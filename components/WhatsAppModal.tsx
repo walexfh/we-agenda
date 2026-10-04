@@ -19,7 +19,10 @@ import {
   ExternalLink,
   Bot,
   Download,
-  User
+  User,
+  QrCode,
+  Copy,
+  CheckCheck
 } from 'lucide-react';
 
 interface WhatsAppModalProps {
@@ -56,6 +59,9 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
   const [simulatedText, setSimulatedText] = useState(`${userProfile.assistantName || 'Jarves'}, gastei 33 reais no mercado.`);
   const [simulationLog, setSimulationLog] = useState<string | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
+  const [copiedWebhook, setCopiedWebhook] = useState(false);
+
+  const webhookUrl = 'https://ufhfryxlsymojfmrtfjk.supabase.co/functions/v1/whatsapp-webhook';
 
   if (!isOpen) return null;
 
@@ -385,10 +391,60 @@ export const WhatsAppModal: React.FC<WhatsAppModalProps> = ({
             )}
           </div>
 
-          {/* Dica de Integração Externa */}
-          <div className="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-700 text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
-            <Info size={13} className="inline mr-1 text-emerald-600" />
-            Para conectar seu número de WhatsApp real via provedor (ex: Evolution API, Baileys, Z-API ou Meta Cloud API), a Edge Function está disponível em <code>supabase/functions/whatsapp-webhook/</code>.
+          {/* Conectar WhatsApp Real com QR Code */}
+          <div className="p-4 bg-gradient-to-br from-emerald-50 to-teal-50/50 dark:from-emerald-950/40 dark:to-teal-950/20 rounded-2xl border border-emerald-200 dark:border-emerald-800/80 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <QrCode className="text-emerald-600 dark:text-emerald-400" size={18} />
+                <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-900 dark:text-emerald-200">
+                  Conectar WhatsApp Real (com QR Code)
+                </h4>
+              </div>
+              <span className="text-[10px] bg-emerald-200/60 dark:bg-emerald-800/60 text-emerald-800 dark:text-emerald-300 px-2 py-0.5 rounded-full font-semibold">
+                Z-API / Evolution
+              </span>
+            </div>
+
+            <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
+              Para o <strong>{assistantName || 'Jarves'}</strong> atender e responder no seu WhatsApp real 24 horas por dia:
+            </p>
+
+            <ol className="text-xs text-gray-600 dark:text-gray-300 space-y-2 list-decimal list-inside bg-white/70 dark:bg-gray-900/60 p-3 rounded-xl border border-emerald-100 dark:border-emerald-900/40">
+              <li>
+                Acesse <a href="https://developer.z-api.io/" target="_blank" rel="noreferrer" className="text-emerald-600 dark:text-emerald-400 font-bold underline">developer.z-api.io</a> e crie uma instância gratuita.
+              </li>
+              <li>
+                Escaneie o <strong>QR Code</strong> que aparecer na tela com seu WhatsApp (em <em>Aparelhos Conectados</em>).
+              </li>
+              <li>
+                Na aba <strong>Webhooks</strong> da Z-API, cole a URL abaixo no evento <em>"Ao receber mensagem"</em>:
+              </li>
+            </ol>
+
+            {/* Caixa de cópia da URL do Webhook */}
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">
+                URL do seu Webhook (Supabase Edge Function):
+              </span>
+              <div className="flex items-center gap-1.5 bg-white dark:bg-gray-800 p-2 rounded-xl border border-emerald-300 dark:border-emerald-700 shadow-sm">
+                <code className="flex-1 text-[11px] font-mono text-emerald-800 dark:text-emerald-300 break-all select-all">
+                  {webhookUrl}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(webhookUrl);
+                    setCopiedWebhook(true);
+                    setTimeout(() => setCopiedWebhook(false), 2500);
+                  }}
+                  className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shrink-0 transition-colors cursor-pointer"
+                  title="Copiar URL"
+                >
+                  {copiedWebhook ? <CheckCheck size={14} /> : <Copy size={14} />}
+                  <span>{copiedWebhook ? 'Copiado!' : 'Copiar'}</span>
+                </button>
+              </div>
+            </div>
           </div>
 
         </div>
