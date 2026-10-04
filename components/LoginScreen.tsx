@@ -11,13 +11,18 @@ import {
   LogIn, 
   UserPlus, 
   KeyRound, 
-  ServerCrash 
+  ServerCrash,
+  ShieldCheck,
+  ArrowLeft,
+  Send
 } from 'lucide-react';
 import { 
   signInWithEmail, 
   signUpWithEmail, 
   sendPasswordResetEmail,
-  signInWithGoogle 
+  signInWithGoogle,
+  signInWithGmailOtp,
+  verifyEmailOtp 
 } from '../services/authService';
 import { isSupabaseConfigured, getSupabaseStatus } from '../services/supabaseClient';
 
@@ -34,12 +39,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const supabaseStatus = getSupabaseStatus();
 
   // State
-  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot' | 'local'>('login');
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot' | 'local' | 'gmail_otp'>('login');
   
   // Form fields
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
   const [localUsername, setLocalUsername] = useState('demo');
   const [localName, setLocalName] = useState('Usuário Local');
 
@@ -125,7 +132,55 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     }
   };
 
-  const handleGoogleLogin = async () => {
+  const handleStartGmailLogin = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setError('');
+    setInfoMessage('');
+
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      setError('Por favor, informe seu e-mail Google/Gmail para receber o código.');
+      setAuthMode('gmail_otp');
+      return;
+    }
+
+    setIsLoading(true);
+    const res = await signInWithGmailOtp(cleanEmail);
+    setIsLoading(false);
+
+    if (res.success) {
+      setOtpSent(true);
+      setAuthMode('gmail_otp');
+      setInfoMessage(`Código de verificação enviado para ${cleanEmail}! Consulte sua caixa de entrada no Gmail.`);
+    } else {
+      setError(res.error || 'Falha ao enviar código para o Gmail.');
+    }
+  };
+
+  const handleVerifyOtpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setInfoMessage('');
+
+    const cleanCode = otpCode.trim();
+    if (!cleanCode || cleanCode.length < 6) {
+      setError('Digite o código numérico de 6 dígitos enviado para seu Gmail.');
+      return;
+    }
+
+    setIsLoading(true);
+    const res = await verifyEmailOtp(email, cleanCode);
+    setIsLoading(false);
+
+    if (res.success && res.user) {
+      const userName = (res.user.user_metadata?.name as string) || res.user.email?.split('@')[0] || 'Usuário';
+      onLoginCloudSuccess(res.user.id, res.user.email || email, userName);
+    } else {
+      setError(res.error || 'Código inválido ou expirado.');
+    }
+  };
+
+  const handleGoogleOAuthDirect = async () => {
     setError('');
     setInfoMessage('');
     setIsLoading(true);
@@ -253,6 +308,119 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
           {/* Formulário Supabase (Nuvem) */}
           {isCloudConfigured && authMode !== 'local' ? (
+            authMode === 'gmail_otp' ? (
+              <div className="space-y-4">
+                <div className="text-center p-3.5 bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-xl">
+                  <div className="flex items-center justify-center gap-2 text-blue-600 dark:text-blue-400 font-semibold text-sm mb-1">
+                    <ShieldCheck size={18} />
+                    Confirmação por E-mail (Gmail)
+                  </div>
+                  <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
+                    {otpSent 
+                      ? <>Enviamos um código de segurança de 6 dígitos para <strong className="text-blue-600 dark:text-blue-400">{email}</strong>. Acesse seu Gmail e digite o código abaixo:</>
+                      : 'Para sua segurança, informe sua conta Google/Gmail para receber o código de confirmação:'}
+                  </p>
+                </div>
+
+                {!otpSent ? (
+                  <form onSubmit={handleStartGmailLogin} className="space-y-3.5">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 ml-1">E-mail Google / Gmail</label>
+                      <div className="relative">
+                        <Mail className="absolute left-3 top-3.5 text-gray-400" size={17} />
+                        <input
+                          type="email"
+                          required
+                          autoFocus
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          placeholder="seu.nome@gmail.com"
+                          className="w-full pl-9 p-3 text-sm bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md transition-all flex items-center justify-center gap-2 text-sm active:scale-[0.98] disabled:opacity-60 cursor-pointer"
+                    >
+                      {isLoading ? 'Enviando código...' : (
+                        <>
+                          <Send size={16} /> Enviar Código para meu Gmail
+                        </>
+                      )}
+                    </button>
+
+                    <div className="pt-2 text-center flex flex-col gap-2">
+                      <button
+                        type="button"
+                        onClick={handleGoogleOAuthDirect}
+                        disabled={isLoading}
+                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                      >
+                        Ou autenticar via popup Google
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setAuthMode('login'); setError(''); }}
+                        className="text-xs text-gray-500 dark:text-gray-400 hover:underline flex items-center justify-center gap-1 mx-auto"
+                      >
+                        <ArrowLeft size={14} /> Voltar ao Login tradicional
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <form onSubmit={handleVerifyOtpSubmit} className="space-y-3.5">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1.5 text-center">
+                        Código de Confirmação (6 dígitos)
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        autoFocus
+                        maxLength={6}
+                        value={otpCode}
+                        onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
+                        placeholder="123456"
+                        className="w-full p-3.5 text-center font-mono text-2xl tracking-[0.4em] font-bold bg-white dark:bg-gray-900 border-2 border-blue-400 dark:border-blue-500 rounded-xl outline-none focus:ring-4 focus:ring-blue-500/20 text-gray-900 dark:text-white"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isLoading || otpCode.length < 6}
+                      className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-md transition-all flex items-center justify-center gap-2 text-sm active:scale-[0.98] disabled:opacity-50 cursor-pointer"
+                    >
+                      {isLoading ? 'Verificando...' : (
+                        <>
+                          <ShieldCheck size={18} /> Confirmar Acesso e Entrar
+                        </>
+                      )}
+                    </button>
+
+                    <div className="flex items-center justify-between text-xs pt-1 px-1">
+                      <button
+                        type="button"
+                        onClick={handleStartGmailLogin}
+                        disabled={isLoading}
+                        className="text-blue-600 dark:text-blue-400 hover:underline"
+                      >
+                        Reenviar código
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setOtpSent(false); setOtpCode(''); setError(''); }}
+                        className="text-gray-500 dark:text-gray-400 hover:underline"
+                      >
+                        Trocar e-mail
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            ) : (
             <form onSubmit={handleCloudAuth} className="space-y-3.5">
               
               {authMode === 'register' && (
@@ -338,7 +506,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 )}
               </button>
 
-              {/* Botão de Login com Google / Gmail */}
+              {/* Botão de Login com Google / Gmail com Confirmação por E-mail */}
               {authMode !== 'forgot' && (
                 <div className="pt-2">
                   <div className="relative flex py-2 items-center">
@@ -351,7 +519,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
                   <button
                     type="button"
-                    onClick={handleGoogleLogin}
+                    onClick={() => {
+                      if (email.trim() && email.includes('@')) {
+                        handleStartGmailLogin();
+                      } else {
+                        setAuthMode('gmail_otp');
+                        setOtpSent(false);
+                      }
+                    }}
                     disabled={isLoading}
                     className="w-full py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/60 text-gray-700 dark:text-gray-200 rounded-xl font-semibold shadow-sm transition-all flex items-center justify-center gap-2.5 text-xs sm:text-sm active:scale-[0.98] cursor-pointer"
                   >
@@ -376,6 +551,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 </button>
               )}
             </form>
+            )
           ) : (
             /* Formulário Modo Local / Demonstração */
             <form onSubmit={handleLocalSubmit} className="space-y-3.5">

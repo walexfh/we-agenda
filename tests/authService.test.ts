@@ -3,7 +3,9 @@ import {
   signUpWithEmail, 
   signInWithEmail, 
   sendPasswordResetEmail, 
-  updatePassword 
+  updatePassword,
+  signInWithGmailOtp,
+  verifyEmailOtp 
 } from '../services/authService';
 
 describe('authService - Validação de Autenticação Segura (Etapa 2)', () => {
@@ -35,5 +37,17 @@ describe('authService - Validação de Autenticação Segura (Etapa 2)', () => {
     const res = await updatePassword('123');
     expect(res.success).toBe(false);
     expect(res.error).toContain('6 caracteres');
+  });
+
+  it('valida e-mail ao solicitar código de confirmação Gmail OTP', async () => {
+    const res = await signInWithGmailOtp('emailinvalido');
+    expect(res.success).toBe(false);
+    expect(res.error).toContain('e-mail válida');
+  });
+
+  it('rejeita código de confirmação vazio na verificação de OTP', async () => {
+    const res = await verifyEmailOtp('teste@gmail.com', '');
+    expect(res.success).toBe(false);
+    expect(res.error).toContain('código de confirmação');
   });
 });

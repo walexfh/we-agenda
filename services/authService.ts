@@ -140,6 +140,88 @@ export async function signInWithGoogle(): Promise<{ success: boolean; error?: st
   }
 }
 
+/**
+ * Solicita envio de código de confirmação / verificação por e-mail para contas Gmail / Google.
+ */
+export async function signInWithGmailOtp(
+  email: string
+): Promise<{ success: boolean; message?: string; error?: string }> {
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+    return { success: false, error: 'Por favor, informe uma conta de e-mail válida (ex: seu.nome@gmail.com).' };
+  }
+
+  if (!isSupabaseConfigured() || !supabase) {
+    return {
+      success: false,
+      error: 'O serviço Supabase não está configurado. Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no arquivo .env.local.'
+    };
+  }
+
+  try {
+    const { error } = await supabase.auth.signInWithOtp({
+      email: cleanEmail,
+      options: {
+        shouldCreateUser: true,
+        emailRedirectTo: typeof window !== 'undefined' ? window.location.origin : undefined,
+      },
+    });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return {
+      success: true,
+      message: `Código de confirmação enviado para ${cleanEmail}. Por favor, consulte sua caixa de entrada no Gmail.`
+    };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Falha ao solicitar código de confirmação.' };
+  }
+}
+
+/**
+ * Valida o código numérico (OTP) de confirmação enviado para o e-mail do usuário.
+ */
+export async function verifyEmailOtp(
+  email: string,
+  token: string
+): Promise<AuthResponse> {
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  const cleanToken = String(token || '').trim();
+
+  if (!cleanEmail || !cleanToken) {
+    return { success: false, error: 'Informe o e-mail e o código de confirmação de 6 dígitos.' };
+  }
+
+  if (!isSupabaseConfigured() || !supabase) {
+    return {
+      success: false,
+      error: 'O serviço Supabase não está configurado.'
+    };
+  }
+
+  try {
+    const { data, error } = await supabase.auth.verifyOtp({
+      email: cleanEmail,
+      token: cleanToken,
+      type: 'email',
+    });
+
+    if (error) {
+      return { success: false, error: 'Código de confirmação inválido ou expirado. Tente novamente.' };
+    }
+
+    return {
+      success: true,
+      user: data.user,
+      session: data.session,
+    };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Falha ao validar código de confirmação.' };
+  }
+}
+
 
 /**
  * Envia e-mail oficial de recuperação e redefinição de senha.
