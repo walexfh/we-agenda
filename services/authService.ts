@@ -168,6 +168,13 @@ export async function signInWithGmailOtp(
     });
 
     if (error) {
+      const msg = error.message.toLowerCase();
+      if (msg.includes('rate limit') || msg.includes('for security purposes') || (error as any).code === 'over_email_send_rate_limit') {
+        return {
+          success: false,
+          error: 'Limite de envio de e-mails do servidor atingido temporariamente (o provedor gratuito limita a 2 e-mails por hora). Verifique se a mensagem anterior caiu no SPAM/Lixo Eletrônico do seu Gmail ou acesse via E-mail e Senha.'
+        };
+      }
       return { success: false, error: error.message };
     }
 
