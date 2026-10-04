@@ -140,7 +140,8 @@ export interface UserProfile {
   avatar?: string;
   timezone?: string; // e.g. 'America/Sao_Paulo'
   assistantName?: string; // e.g. 'Jarves'
-  whatsapp?: string; // e.g. '+5511999998888'
+  assistantPhone?: string; // e.g. '+5511988887777' (Contato do Assistente no WhatsApp)
+  whatsapp?: string; // e.g. '+5511999998888' (Número do Usuário)
   whatsappNotifications?: boolean;
   customCategories?: Category[];
 }

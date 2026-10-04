@@ -551,6 +551,7 @@ export default function App() {
           avatar_url: newProfile.avatar || '',
           timezone: newProfile.timezone || DEFAULT_TIMEZONE,
           assistant_name: newProfile.assistantName || 'Jarves',
+          assistant_phone: newProfile.assistantPhone || null,
           whatsapp: newProfile.whatsapp || null,
           whatsapp_notifications: newProfile.whatsappNotifications ?? true,
           custom_categories: newProfile.customCategories || [],
