@@ -54,6 +54,7 @@ import { DeleteModal } from './components/DeleteModal';
 import { BalanceSummary } from './components/BalanceSummary';
 import { LoginScreen } from './components/LoginScreen';
 import { ImportModal } from './components/ImportModal';
+import { AssistantModal } from './components/AssistantModal';
 import { DEFAULT_TIMEZONE } from './utils/reminderUtils';
 import { 
   getNotificationPermission, 
@@ -82,7 +83,8 @@ import {
   RefreshCw,
   Bell,
   BellOff,
-  Globe
+  Globe,
+  Bot
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -142,6 +144,7 @@ export default function App() {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [isSideMenuOpen, setIsSideMenuOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isAssistantOpen, setIsAssistantOpen] = useState(false);
   const [isDayDetailsOpen, setIsDayDetailsOpen] = useState(false);
   const [showValues, setShowValues] = useState(true);
   
@@ -509,6 +512,8 @@ export default function App() {
           id: currentUserId,
           name: newProfile.name,
           avatar_url: newProfile.avatar || '',
+          timezone: newProfile.timezone || DEFAULT_TIMEZONE,
+          assistant_name: newProfile.assistantName || 'Jarves',
           updated_at: new Date().toISOString(),
         });
       }
@@ -1020,6 +1025,17 @@ export default function App() {
               {notificationPermission === 'default' ? ' (Ativar)' : ''}
             </span>
           </button>
+
+          {/* Botão de Acesso Rápido ao Assistente IA (Etapa 4) */}
+          <button
+            type="button"
+            onClick={() => setIsAssistantOpen(true)}
+            title={`Conversar com ${userProfile.assistantName || 'Jarves'} (Assistente IA)`}
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-sm hover:opacity-90 transition-opacity cursor-pointer"
+          >
+            <Bot size={14} />
+            <span className="hidden sm:inline">{userProfile.assistantName || 'Jarves'}</span>
+          </button>
         </div>
 
         <div className="flex items-center gap-2">
@@ -1063,16 +1079,28 @@ export default function App() {
           onDayClick={handleDayClick}
         />
         
-        {/* Floating Action Button */}
-        <div className="absolute bottom-24 right-6 z-30">
+        {/* Floating Action Buttons */}
+        <div className="absolute bottom-24 right-6 z-30 flex flex-col items-center gap-3">
+          {/* Botão Assistente IA (Etapa 4) */}
+          <button 
+            onClick={() => setIsAssistantOpen(true)}
+            title={`Abrir ${userProfile.assistantName || 'Jarves'} (Assistente IA)`}
+            aria-label={`Abrir ${userProfile.assistantName || 'Jarves'} (Assistente IA)`}
+            className="w-12 h-12 bg-gradient-to-tr from-purple-600 via-indigo-600 to-blue-500 rounded-full shadow-xl flex items-center justify-center text-white hover:scale-110 transition-all active:scale-95 border-2 border-white/50 dark:border-gray-800 cursor-pointer"
+          >
+            <Bot size={24} />
+          </button>
+
+          {/* Botão Manual de Adição */}
           <button 
             onClick={() => {
               setSelectedDate(selectedDate || new Date());
               setEditingItem(null); 
               setIsAddModalOpen(true);
             }}
+            title="Adicionar compromisso ou lançamento manualmente"
             aria-label="Adicionar novo compromisso ou lançamento"
-            className="w-14 h-14 bg-blue-600 rounded-full shadow-xl flex items-center justify-center text-white hover:bg-blue-700 hover:scale-105 transition-all active:scale-95"
+            className="w-14 h-14 bg-blue-600 rounded-full shadow-xl flex items-center justify-center text-white hover:bg-blue-700 hover:scale-105 transition-all active:scale-95 cursor-pointer"
           >
             <Plus size={32} />
           </button>
@@ -1269,6 +1297,17 @@ export default function App() {
           onConfirmImport={handleConfirmImport}
         />
       )}
+
+      {/* Modal do Assistente IA (Etapa 4) */}
+      <AssistantModal
+        isOpen={isAssistantOpen}
+        onClose={() => setIsAssistantOpen(false)}
+        userProfile={userProfile}
+        onUpdateProfile={handleUpdateProfile}
+        items={allVisibleItems}
+        monthlySummary={monthlySummary}
+        onSaveItem={handleSaveItem}
+      />
 
       {/* Resumo do Mês */}
       <BalanceSummary 

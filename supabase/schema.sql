@@ -10,6 +10,7 @@ create table if not exists public.profiles (
   name text not null default '',
   avatar_url text,
   timezone text not null default 'America/Sao_Paulo',
+  assistant_name text not null default 'Jarves',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );

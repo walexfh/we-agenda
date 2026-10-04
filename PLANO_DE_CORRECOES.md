@@ -256,9 +256,82 @@ Este documento registra o diagnóstico, decisões técnicas, implementação, va
 
 ---
 
+---
+
+## Etapa 4 — Assistente com Nome Personalizável e IA
+
+### 1. Diagnóstico e Arquitetura da Etapa 4
+
+1. **Nome Personalizável do Assistente:**
+   - Nome padrão configurado: `Jarves`.
+   - O usuário pode renomear seu assistente para qualquer nome desejado (ex: "Jarvis", "Siri", "Antigravity", "Mia", etc.) diretamente no [AssistantModal.tsx](file:///c:/Users/wnet4/Downloads/w&e.agenda/components/AssistantModal.tsx) ou no [SideMenu.tsx](file:///c:/Users/wnet4/Downloads/w&e.agenda/components/SideMenu.tsx).
+   - O nome é persistido na coluna `assistant_name` do perfil no Supabase e no estado local do perfil.
+   - O assistente responde tanto a comandos chamados pelo nome (ex: *"Jarves, gastei 33 reais no mercado."*) quanto a comandos diretos (ex: *"gastei 33 no mercado"*).
+
+2. **Garantia Transacional: Responder Somente Depois de Confirmar a Gravação:**
+   - **Regra Fundamental Cumprida:** O pipeline do assistente em [services/assistantService.ts](file:///c:/Users/wnet4/Downloads/w&e.agenda/services/assistantService.ts) primeiro executa a interpretação NLU, constrói o objeto de domínio fortemente tipado e chama a função persistente de gravação `onSaveItem`.
+   - **Confirmação Estrita:** A mensagem de confirmação para o usuário só é montada e exibida **após** a gravação ser confirmada com sucesso no armazenamento local e na nuvem.
+   - **Tratamento de Falha:** Se a persistência falhar ou a validação for rejeitada, o assistente informa o erro com transparência e jamais simula uma confirmação falsa.
+
+3. **Motor Determinístico de NLU / Compreensão de Linguagem Natural (`utils/assistantEngine.ts`):**
+   - **Despesas Imediatas (Passadas):** *"Jarves, gastei 33 reais no mercado."* → detecta tipo `expense`, valor `3300` centavos inteiros (R$ 33,00), data atual, status `isPaid: true` (já pago) e título limpo `"Mercado"`.
+   - **Despesas Futuras / Vencimentos:** *"Lembrar de pagar o condomínio de 450 reais dia 10"* → detecta tipo `expense`, valor `45000` centavos (R$ 450,00), data calculada no fuso da conta, status `isPaid: false` (a pagar) e lembrete ativo.
+   - **Receitas:** *"Recebi 1200 de freelance hoje"* → detecta tipo `income`, valor `120000` centavos (R$ 1.200,00), status `isPaid: true` e título `"Freelance"`.
+   - **Compromissos:** *"Dentista amanhã às 14h"* → detecta tipo `appointment`, data de amanhã, horário das `14:00` às `15:00` e alerta de 15 min antes.
+   - **Consultas em Linguagem Natural:** *"Qual minha agenda de hoje?"* e *"Quanto gastei este mês?"* com síntese detalhada e formatada em BRL.
+
+4. **Interface e Interação por Voz / Áudio no Navegador:**
+   - Interface de chat dedicada [AssistantModal.tsx](file:///c:/Users/wnet4/Downloads/w&e.agenda/components/AssistantModal.tsx) com chips de atalho rápido.
+   - Integração com a **Web Speech API** no botão de microfone, permitindo ditar comandos por áudio diretamente no navegador com transcrição instantânea e envio automático.
+   - Botão Flutuante (FAB) de gradiente violeta/azul no canto inferior direito para acesso rápido em 1 clique em qualquer visualização.
+   - Botão de acesso rápido no cabeçalho superior.
+
+---
+
+### 2. Arquivos Alterados e Criados na Etapa 4
+
+| Arquivo | Motivo da Alteração | Status |
+|---|---|---|
+| `types.ts` | Adição de `assistantName` em `UserProfile` e interfaces `AssistantParsedAction` e `AssistantChatMessage` | Concluído |
+| `utils/assistantEngine.ts` | Motor de NLU com parsing de despesas, receitas, compromissos, valores em centavos e datas contextuais | Concluído |
+| `services/assistantService.ts` | Serviço com garantia transacional de gravação confirmada no banco/storage antes da resposta | Concluído |
+| `components/AssistantModal.tsx` | Interface de chat com o assistente, atalhos, gravação de áudio via microfone e personalização de nome | Concluído |
+| `components/SideMenu.tsx` | Campo de personalização do nome do assistente nas preferências do perfil | Concluído |
+| `services/syncService.ts` | Inclusão de `assistant_name` na sincronização do perfil na nuvem | Concluído |
+| `supabase/schema.sql` | Coluna `assistant_name text not null default 'Jarves'` na tabela `profiles` | Concluído |
+| `App.tsx` | Integração do modal do assistente, botão FAB duplo e botão de cabeçalho | Concluído |
+| `tests/assistantEngine.test.ts` | Testes do caso de uso obrigatório ("gastei 33 reais no mercado"), NLU e confirmação transacional | Concluído |
+
+---
+
+### 3. Validação e Testes da Etapa 4
+
+#### A. Verificação TypeScript (`npm run typecheck`)
+- **Comando:** `node ./node_modules/typescript/bin/tsc --noEmit`
+- **Resultado:** **0 erros**. Compilação 100% limpa.
+
+#### B. Testes Automatizados Unitários (`npm run test`)
+- **Ferramenta:** Vitest v3.2.7
+- **Resultado:** **41 testes em 10 arquivos com 100% de aprovação**.
+  - `tests/assistantEngine.test.ts` (9 testes):
+    - Remoção do gatilho/nome do assistente.
+    - Extração de valores em centavos inteiros ("33 reais e 50 centavos" → 3350, "1200" → 120000).
+    - Caso de uso mandatório: `"Jarves, gastei 33 reais no mercado."` validando despesa paga de R$ 33,00 na data atual.
+    - Agendamento de compromissos ("Dentista amanhã às 14h").
+    - Registro de receitas ("Recebi 1200 de freelance hoje").
+    - Consultas de agenda e balanço.
+    - Teste de garantia transacional: `onSaveItem` chamado e confirmado antes da resposta, com resposta de erro transparente caso a gravação falhe.
+  - Demais testes mantidos e aprovados (32 testes de lembretes, finanças, recorrências, storage e auth).
+
+#### C. Build de Produção (`npm run build`)
+- **Comando:** `tsc --noEmit && vite build`
+- **Resultado:** Build concluído com sucesso em 9.15s gerando bundle otimizado em `dist/`.
+
+---
+
 ### 4. Próximas Etapas
 
-- **Etapa 4:** Assistente Pessoal com IA interpretando comandos em linguagem natural (ex: criação de despesas, compromissos e respostas somente após confirmação de gravação no banco).
-- **Etapa 5:** Integração oficial com WhatsApp (áudio e texto, com transcrição e webhook).
+- **Etapa 5:** Integração oficial com WhatsApp (áudio e texto, com transcrição, webhook e consumo da fila de lembretes).
 - **Etapa 6:** Melhorias adicionais de produto (categorias personalizadas, pagamentos parciais, parcelamento de compras e busca avançada).
+
 

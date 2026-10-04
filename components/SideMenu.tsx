@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { CalendarItem, UserProfile } from '../types';
-import { X, CheckSquare, Square, DollarSign, Wallet, Moon, Sun, User, Edit2, Check, LogOut, Globe, Bell } from 'lucide-react';
+import { X, CheckSquare, Square, DollarSign, Wallet, Moon, Sun, User, Edit2, Check, LogOut, Globe, Bell, Bot } from 'lucide-react';
 import { formatCurrency } from '../utils/moneyUtils';
 import { formatMonthYear } from '../utils/dateUtils';
 import { POPULAR_TIMEZONES } from '../utils/reminderUtils';
@@ -158,6 +158,20 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                   Ativar Lembretes
                 </button>
               )}
+            </div>
+
+            {/* Nome do Assistente IA (Etapa 4) */}
+            <div className="flex items-center justify-between text-xs pt-1 border-t border-gray-200 dark:border-gray-700/40">
+              <span className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
+                <Bot size={13} className="text-purple-500" /> Nome do Assistente:
+              </span>
+              <input
+                type="text"
+                value={userProfile.assistantName || 'Jarves'}
+                onChange={(e) => setUserProfile({ ...userProfile, assistantName: e.target.value })}
+                className="w-24 text-xs p-1 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded outline-none text-right font-semibold text-purple-600 dark:text-purple-400"
+                title="Nome configurável do assistente"
+              />
             </div>
           </div>
         </div>

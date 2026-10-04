@@ -109,6 +109,34 @@ export interface UserProfile {
   name: string;
   avatar?: string;
   timezone?: string; // e.g. 'America/Sao_Paulo'
+  assistantName?: string; // e.g. 'Jarves'
+}
+
+export type AssistantIntentType = 
+  | 'create_expense' 
+  | 'create_income' 
+  | 'create_appointment' 
+  | 'query_schedule' 
+  | 'query_balance' 
+  | 'unknown';
+
+export interface AssistantParsedAction {
+  intent: AssistantIntentType;
+  confidence: number;
+  itemToSave?: Omit<CalendarItem, 'id'>;
+  recurrence?: RecurrenceType;
+  queryDateStr?: string;
+  explanation: string;
+  confirmationMessage?: string;
+}
+
+export interface AssistantChatMessage {
+  id: string;
+  sender: 'user' | 'assistant';
+  text: string;
+  timestamp: string;
+  status?: 'processing' | 'saved' | 'error';
+  itemSaved?: CalendarItem;
 }
 
 export interface StorageRecoveryInfo {

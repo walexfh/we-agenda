@@ -25,7 +25,7 @@ export async function fetchCloudData(userId: string): Promise<CloudDataResult> {
     // 1. Carregar perfil
     const { data: profileData } = await supabase
       .from('profiles')
-      .select('name, avatar_url, timezone')
+      .select('name, avatar_url, timezone, assistant_name')
       .eq('id', userId)
       .maybeSingle();
 
@@ -33,6 +33,7 @@ export async function fetchCloudData(userId: string): Promise<CloudDataResult> {
       name: profileData?.name || '',
       avatar: profileData?.avatar_url || '',
       timezone: profileData?.timezone || 'America/Sao_Paulo',
+      assistantName: profileData?.assistant_name || 'Jarves',
     };
 
     // 2. Carregar itens da agenda
