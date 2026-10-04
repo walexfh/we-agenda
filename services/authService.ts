@@ -112,6 +112,36 @@ export async function signInWithEmail(
 }
 
 /**
+ * Realiza autenticação via Google / Gmail (OAuth).
+ */
+export async function signInWithGoogle(): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured() || !supabase) {
+    return {
+      success: false,
+      error: 'O serviço Supabase não está configurado. Configure VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no arquivo .env.local.'
+    };
+  }
+
+  try {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
+
+    if (error) {
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Falha ao conectar com o Google.' };
+  }
+}
+
+
+/**
  * Envia e-mail oficial de recuperação e redefinição de senha.
  */
 export async function sendPasswordResetEmail(email: string): Promise<{ success: boolean; message?: string; error?: string }> {
