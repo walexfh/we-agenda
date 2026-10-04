@@ -11,9 +11,13 @@ create table if not exists public.profiles (
   avatar_url text,
   timezone text not null default 'America/Sao_Paulo',
   assistant_name text not null default 'Jarves',
+  whatsapp text,
+  whatsapp_notifications boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+create index if not exists idx_profiles_whatsapp on public.profiles(whatsapp);
 
 -- 2. TABELA DE ITENS DA AGENDA E FINANÇAS
 create table if not exists public.calendar_items (

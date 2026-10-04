@@ -110,6 +110,8 @@ export interface UserProfile {
   avatar?: string;
   timezone?: string; // e.g. 'America/Sao_Paulo'
   assistantName?: string; // e.g. 'Jarves'
+  whatsapp?: string; // e.g. '+5511999998888'
+  whatsappNotifications?: boolean;
 }
 
 export type AssistantIntentType = 
@@ -137,6 +139,24 @@ export interface AssistantChatMessage {
   timestamp: string;
   status?: 'processing' | 'saved' | 'error';
   itemSaved?: CalendarItem;
+}
+
+export interface WhatsAppMessagePayload {
+  from: string; // Número no padrão E.164 (ex: +5511999998888)
+  messageType: 'text' | 'audio';
+  text?: string;
+  audioUrl?: string;
+  audioBase64?: string;
+  audioDurationSeconds?: number;
+  timestamp?: string;
+}
+
+export interface WhatsAppWebhookResult {
+  success: boolean;
+  replySent: boolean;
+  replyText: string;
+  actionTaken?: AssistantIntentType;
+  createdItemId?: string;
 }
 
 export interface StorageRecoveryInfo {

@@ -55,6 +55,7 @@ import { BalanceSummary } from './components/BalanceSummary';
 import { LoginScreen } from './components/LoginScreen';
 import { ImportModal } from './components/ImportModal';
 import { AssistantModal } from './components/AssistantModal';
+import { WhatsAppModal } from './components/WhatsAppModal';
 import { DEFAULT_TIMEZONE } from './utils/reminderUtils';
 import { 
   getNotificationPermission, 
@@ -145,6 +146,7 @@ export default function App() {
   const [isSideMenuOpen, setIsSideMenuOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
+  const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
   const [isDayDetailsOpen, setIsDayDetailsOpen] = useState(false);
   const [showValues, setShowValues] = useState(true);
   
@@ -514,6 +516,8 @@ export default function App() {
           avatar_url: newProfile.avatar || '',
           timezone: newProfile.timezone || DEFAULT_TIMEZONE,
           assistant_name: newProfile.assistantName || 'Jarves',
+          whatsapp: newProfile.whatsapp || null,
+          whatsapp_notifications: newProfile.whatsappNotifications ?? true,
           updated_at: new Date().toISOString(),
         });
       }
@@ -1126,6 +1130,7 @@ export default function App() {
         onLogout={handleLogout}
         notificationPermission={notificationPermission}
         onRequestNotificationPermission={handleRequestNotificationPermission}
+        onOpenWhatsAppModal={() => setIsWhatsAppModalOpen(true)}
       />
 
       <FilterMenu 
@@ -1302,6 +1307,17 @@ export default function App() {
       <AssistantModal
         isOpen={isAssistantOpen}
         onClose={() => setIsAssistantOpen(false)}
+        userProfile={userProfile}
+        onUpdateProfile={handleUpdateProfile}
+        items={allVisibleItems}
+        monthlySummary={monthlySummary}
+        onSaveItem={handleSaveItem}
+      />
+
+      {/* Modal de Integração WhatsApp (Etapa 5) */}
+      <WhatsAppModal
+        isOpen={isWhatsAppModalOpen}
+        onClose={() => setIsWhatsAppModalOpen(false)}
         userProfile={userProfile}
         onUpdateProfile={handleUpdateProfile}
         items={allVisibleItems}

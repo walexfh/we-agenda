@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { CalendarItem, UserProfile } from '../types';
-import { X, CheckSquare, Square, DollarSign, Wallet, Moon, Sun, User, Edit2, Check, LogOut, Globe, Bell, Bot } from 'lucide-react';
+import { X, CheckSquare, Square, DollarSign, Wallet, Moon, Sun, User, Edit2, Check, LogOut, Globe, Bell, Bot, MessageSquare } from 'lucide-react';
 import { formatCurrency } from '../utils/moneyUtils';
 import { formatMonthYear } from '../utils/dateUtils';
 import { POPULAR_TIMEZONES } from '../utils/reminderUtils';
@@ -23,6 +23,7 @@ interface SideMenuProps {
   onLogout: () => void;
   notificationPermission?: NotificationPermission | 'unsupported';
   onRequestNotificationPermission?: () => void;
+  onOpenWhatsAppModal?: () => void;
 }
 
 export const SideMenu: React.FC<SideMenuProps> = ({ 
@@ -39,7 +40,8 @@ export const SideMenu: React.FC<SideMenuProps> = ({
   setUserProfile,
   onLogout,
   notificationPermission,
-  onRequestNotificationPermission
+  onRequestNotificationPermission,
+  onOpenWhatsAppModal
 }) => {
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState(userProfile.name);
@@ -173,6 +175,21 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                 title="Nome configurável do assistente"
               />
             </div>
+
+            {/* Integração WhatsApp (Etapa 5) */}
+            <button
+              type="button"
+              onClick={onOpenWhatsAppModal}
+              className="w-full flex items-center justify-between p-2 mt-1 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 text-emerald-800 dark:text-emerald-300 text-xs font-semibold hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors cursor-pointer"
+            >
+              <span className="flex items-center gap-1.5">
+                <MessageSquare size={14} className="text-emerald-600 dark:text-emerald-400" />
+                WhatsApp Integrado
+              </span>
+              <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
+                {userProfile.whatsapp ? 'Conectado ✓' : 'Configurar ›'}
+              </span>
+            </button>
           </div>
         </div>
 

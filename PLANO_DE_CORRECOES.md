@@ -329,9 +329,93 @@ Este documento registra o diagnóstico, decisões técnicas, implementação, va
 
 ---
 
+## Etapa 5 — Integração com WhatsApp por Texto e Áudio
+
+### 1. Diagnóstico e Arquitetura da Etapa 5
+
+1. **Normalização e Validação Telefônica E.164:**
+   - Criação de utilitários em [services/whatsappService.ts](file:///c:/Users/wnet4/Downloads/w&e.agenda/services/whatsappService.ts) para validação e normalização de números telefônicos no padrão internacional E.164 (`normalizeWhatsAppNumber`, `isValidWhatsAppNumber`, `formatDisplayPhoneNumber`).
+   - Suporte inteligente a números brasileiros: aceita formatos com ou sem DDI +55, com ou sem nono dígito, parênteses e traços (ex: `(11) 98765-4321`, `11987654321`, `+55 11 98765-4321` → normalizado para `+5511987654321`).
+   - O número normalizado é persistido na coluna `whatsapp` da tabela `profiles` no Supabase e no estado de perfil da aplicação.
+
+2. **Pipeline de Áudio e Transcrição:**
+   - Implementação de `transcribeAudioMessage` preparada para receber mensagens de voz (OGG/Opus, MP3, WAV, etc.) enviadas pelo WhatsApp.
+   - Suporte plugável a provedores de transcrição por inteligência artificial (OpenAI Whisper, Google Cloud Speech-to-Text ou Supabase Storage audio-to-text), processando o áudio recebido e convertendo-o em texto bruto que é encaminhado diretamente ao motor `assistantEngine`.
+   - Fallback gracioso com tratamento de falhas em conexões de áudio inaudíveis ou sem fala detectada.
+
+3. **Webhook Bidirecional do WhatsApp (Texto e Áudio):**
+   - **Supabase Edge Function:** Desenvolvida em [supabase/functions/whatsapp-webhook/index.ts](file:///c:/Users/wnet4/Downloads/w&e.agenda/supabase/functions/whatsapp-webhook/index.ts), compatível com Meta WhatsApp Cloud API, Evolution API e Z-API.
+   - **Fluxo do Webhook:**
+     1. Recebe a requisição HTTP POST com a mensagem de texto ou URL/mídia de áudio.
+     2. Identifica o usuário proprietário a partir do número de telefone de origem (`From` / `wa_id`), consultando `profiles` com índice dedicado `idx_profiles_whatsapp`.
+     3. Se for áudio, executa transcrição automática.
+     4. Encaminha o texto para o motor de NLU [assistantEngine.ts](file:///c:/Users/wnet4/Downloads/w&e.agenda/utils/assistantEngine.ts).
+     5. **Garantia Transacional Estrita ("responder somente depois de confirmar a gravação"):** O webhook chama `saveItem` para persistir o registro (seja uma despesa como *"Jarves, gastei 33 reais no mercado"*, uma receita ou um compromisso) e **somente** após a confirmação da transação gera a mensagem final de confirmação. Se a gravação falhar, o assistente responde com um aviso de erro e não confirma o registro.
+     6. Envia a resposta de volta ao usuário pelo WhatsApp via API.
+
+4. **Despacho de Lembretes Devidos para o WhatsApp:**
+   - Função `dispatchDueRemindersToWhatsApp` em [services/whatsappService.ts](file:///c:/Users/wnet4/Downloads/w&e.agenda/services/whatsappService.ts).
+   - Consulta a fila de lembretes da tabela `reminders` com canal `whatsapp` ou `all` e status `pending`.
+   - Verifica se o perfil do usuário possui número WhatsApp cadastrado e a flag `whatsapp_notifications: true` ativa.
+   - Formata a mensagem com detalhes do compromisso ou vencimento de conta e atualiza o status do lembrete para `sent` (ou `failed` em caso de erro), registrando carimbo de data/hora.
+
+5. **Interface de Configuração e Simulador de Webhook ([components/WhatsAppModal.tsx](file:///c:/Users/wnet4/Downloads/w&e.agenda/components/WhatsAppModal.tsx)):**
+   - Modal com interface moderna e responsiva acessível pelo [SideMenu.tsx](file:///c:/Users/wnet4/Downloads/w&e.agenda/components/SideMenu.tsx) (botão com ícone `MessageSquare`).
+   - Configuração do telefone WhatsApp com máscara visual em tempo real e validação instantânea.
+   - Switch de ativação de notificações e lembretes de vencimentos via WhatsApp.
+   - **Simulador Interativo de Webhook:** Ambiente em tempo real onde o usuário pode testar comandos de texto (ex: *"Jarves, gastei 33 reais no mercado"* ou *"Dentista na sexta às 16h"*) e simular áudio, inspecionando o payload do webhook recebido, a gravação real no banco/agenda e a resposta enviada de volta pelo WhatsApp.
+
+---
+
+### 2. Arquivos Alterados e Criados na Etapa 5
+
+| Arquivo | Motivo da Alteração | Status |
+|---|---|---|
+| `types.ts` | Adição de `whatsapp` e `whatsappNotifications` em `UserProfile`; interfaces de payload de webhook `WhatsAppMessagePayload` e `WhatsAppWebhookResult` | Concluído |
+| `services/whatsappService.ts` | Normalização E.164, transcrição de áudio, envio de mensagem, processador transacional de webhook e despachante de lembretes | Concluído |
+| `supabase/schema.sql` | Adição das colunas `whatsapp text` e `whatsapp_notifications boolean default true` na tabela `profiles` com índice `idx_profiles_whatsapp` | Concluído |
+| `supabase/functions/whatsapp-webhook/index.ts` | Supabase Edge Function completa para recepção de webhooks do WhatsApp (texto e áudio) | Concluído |
+| `tsconfig.json` | Exclusão de `supabase/functions` da checagem do Vite para evitar conflitos de tipos entre Deno e DOM | Concluído |
+| `components/WhatsAppModal.tsx` | Modal com configuração de telefone, lembretes WhatsApp e simulador interativo de webhook | Concluído |
+| `components/SideMenu.tsx` | Botão de integração com WhatsApp na seção de perfil com ícone `MessageSquare` | Concluído |
+| `services/syncService.ts` | Mapeamento dos campos `whatsapp` e `whatsapp_notifications` na sincronização com Supabase | Concluído |
+| `App.tsx` | Gerenciamento de estado do modal de WhatsApp, persistência das configurações no perfil e injeção no SideMenu | Concluído |
+| `tests/whatsappService.test.ts` | Testes de normalização E.164, transcrição de áudio, webhook transacional com save-before-reply e despacho de lembretes | Concluído |
+
+---
+
+### 3. Validação e Testes da Etapa 5
+
+#### A. Verificação TypeScript (`npm run typecheck`)
+- **Comando:** `node ./node_modules/typescript/bin/tsc --noEmit`
+- **Resultado:** **0 erros**. Compilação 100% limpa em todos os componentes e serviços.
+
+#### B. Testes Automatizados Unitários (`npm run test`)
+- **Ferramenta:** Vitest v3.2.7
+- **Resultado:** **48 testes em 11 arquivos com 100% de aprovação**.
+  - `tests/whatsappService.test.ts` (7 testes):
+    - Normalização e validação de números telefônicos no padrão E.164 com e sem nono dígito.
+    - Formatação amigável para exibição visual no frontend.
+    - Transcrição de mensagens de voz e áudio.
+    - Processamento de webhook com garantia transacional: `onSaveItem` chamado e confirmado antes da resposta enviada via WhatsApp.
+    - Rejeição segura de números desconhecidos não vinculados a nenhum usuário.
+    - Tratamento de erro quando a gravação falha (sem falsa confirmação).
+    - Despacho de lembretes pendentes na fila devida para números WhatsApp válidos com atualização de status para `sent`.
+  - Demais 41 testes de etapas anteriores mantidos com 100% de aprovação (NLU, motor do Jarves, lembretes, finanças, recorrências, storage e auth).
+
+#### C. Build de Produção (`npm run build`)
+- **Comando:** `tsc --noEmit && vite build`
+- **Resultado:** Build concluído com sucesso em 9.20s gerando bundle otimizado em `dist/`.
+
+---
+
 ### 4. Próximas Etapas
 
-- **Etapa 5:** Integração oficial com WhatsApp (áudio e texto, com transcrição, webhook e consumo da fila de lembretes).
-- **Etapa 6:** Melhorias adicionais de produto (categorias personalizadas, pagamentos parciais, parcelamento de compras e busca avançada).
+- **Etapa 6 — Melhorias de Produto e Produtividade Financeira:**
+  - Categorias personalizadas para receitas e despesas com cores e ícones customizáveis.
+  - Pagamentos e recebimentos parciais de contas a pagar e a receber com histórico de amortizações.
+  - Parcelamento de compras e lançamentos (ex: compra em 12x no cartão com datas e vencimentos automáticos).
+  - Busca global e filtros avançados por período, status, categoria e tipo de lançamento.
+
 
 
