@@ -6,7 +6,8 @@ import {
   RecurrenceType, 
   UserProfile, 
   RecurrenceSeries, 
-  FinancialSummary 
+  FinancialSummary,
+  Category 
 } from './types';
 import { 
   formatMonthYear, 
@@ -14,7 +15,14 @@ import {
   generateCalendarDays, 
   isEndTimeAfterStartTime 
 } from './utils/dateUtils';
-import { formatCurrency } from './utils/moneyUtils';
+import { 
+  formatCurrency, 
+  getPaidAmountCents, 
+  getRemainingAmountCents, 
+  getPaymentStatus 
+} from './utils/moneyUtils';
+import { createInstallmentItems } from './utils/installmentUtils';
+import { getCategoryById } from './utils/categoryUtils';
 import { 
   generateOccurrencesForInterval, 
   deleteSingleOccurrence, 
@@ -56,6 +64,8 @@ import { LoginScreen } from './components/LoginScreen';
 import { ImportModal } from './components/ImportModal';
 import { AssistantModal } from './components/AssistantModal';
 import { WhatsAppModal } from './components/WhatsAppModal';
+import { SearchModal } from './components/SearchModal';
+import { CategoryManagerModal } from './components/CategoryManagerModal';
 import { DEFAULT_TIMEZONE } from './utils/reminderUtils';
 import { 
   getNotificationPermission, 
@@ -85,7 +95,9 @@ import {
   Bell,
   BellOff,
   Globe,
-  Bot
+  Bot,
+  Search,
+  Tag
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -147,6 +159,8 @@ export default function App() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
   const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
   const [isDayDetailsOpen, setIsDayDetailsOpen] = useState(false);
   const [showValues, setShowValues] = useState(true);
   
@@ -155,7 +169,7 @@ export default function App() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<CalendarItem | null>(null);
 
-  // Filter State
+  // Filter State (Etapa 6: Categoria e Status Parcial)
   const [filters, setFilters] = useState<FilterState>({
     showAppointments: true,
     showFinances: true,
@@ -163,7 +177,21 @@ export default function App() {
     showExpenses: true,
     showPaidOnly: false,
     showUnpaidOnly: false,
+    selectedCategory: '',
+    paymentStatusFilter: 'all',
   });
+
+  // Atalho Global Ctrl + K / Cmd + K para Busca
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsSearchModalOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
 
   // Verifica se há registros locais prévios elegíveis para importação
   const checkLocalDataForImport = useCallback((cloudUserId: string) => {
@@ -378,7 +406,7 @@ export default function App() {
     return combined;
   }, [items, series, currentDate]);
 
-  // --- Resumo Financeiro ---
+  // --- Resumo Financeiro (Etapa 6: com Amortizações e Pagamentos Parciais) ---
   const monthlySummary = useMemo<FinancialSummary>(() => {
     const monthStart = startOfMonth(currentDate);
     const monthEnd = endOfMonth(currentDate);
@@ -396,19 +424,15 @@ export default function App() {
     let expensePendingCents = 0;
 
     for (const item of monthlyItems) {
-      const amount = item.amountCents || 0;
+      const paidCents = getPaidAmountCents(item);
+      const remainingCents = getRemainingAmountCents(item);
+
       if (item.type === 'income') {
-        if (item.isPaid) {
-          incomeReceivedCents += amount;
-        } else {
-          incomePendingCents += amount;
-        }
+        incomeReceivedCents += paidCents;
+        incomePendingCents += remainingCents;
       } else if (item.type === 'expense') {
-        if (item.isPaid) {
-          expensePaidCents += amount;
-        } else {
-          expensePendingCents += amount;
-        }
+        expensePaidCents += paidCents;
+        expensePendingCents += remainingCents;
       }
     }
 
@@ -439,8 +463,19 @@ export default function App() {
       if (item.type === 'income' && !filters.showIncome) return false;
       if (item.type === 'expense' && !filters.showExpenses) return false;
       
-      if (filters.showPaidOnly && (item.type === 'income' || item.type === 'expense') && !item.isPaid) return false;
-      if (filters.showUnpaidOnly && (item.type === 'income' || item.type === 'expense') && item.isPaid) return false;
+      // Filtro de Categoria
+      if (filters.selectedCategory && (item.type === 'income' || item.type === 'expense') && item.category !== filters.selectedCategory) {
+        return false;
+      }
+
+      // Filtro de Status de Pagamento
+      if (filters.paymentStatusFilter && filters.paymentStatusFilter !== 'all' && (item.type === 'income' || item.type === 'expense')) {
+        const pStatus = getPaymentStatus(item);
+        if (pStatus !== filters.paymentStatusFilter) return false;
+      } else {
+        if (filters.showPaidOnly && (item.type === 'income' || item.type === 'expense') && !item.isPaid) return false;
+        if (filters.showUnpaidOnly && (item.type === 'income' || item.type === 'expense') && item.isPaid) return false;
+      }
 
       return true;
     });
@@ -518,6 +553,7 @@ export default function App() {
           assistant_name: newProfile.assistantName || 'Jarves',
           whatsapp: newProfile.whatsapp || null,
           whatsapp_notifications: newProfile.whatsappNotifications ?? true,
+          custom_categories: newProfile.customCategories || [],
           updated_at: new Date().toISOString(),
         });
       }
@@ -551,7 +587,8 @@ export default function App() {
   const handleSaveItem = useCallback(async (
     baseItem: Omit<CalendarItem, 'id'>, 
     recurrence: RecurrenceType, 
-    editScope: 'single' | 'sequence' = 'single'
+    editScope: 'single' | 'sequence' = 'single',
+    installmentConfig?: { count: number; isTotalAmount: boolean }
   ): Promise<boolean> => {
     if (!currentUserId) return false;
 
@@ -680,7 +717,21 @@ export default function App() {
       }
     } else {
       // Criação de NOVO
-      if (recurrence === 'once') {
+      // Etapa 6: Se for parcelamento de compra
+      if (installmentConfig && installmentConfig.count > 1) {
+        const installmentItems = createInstallmentItems(
+          baseItem,
+          installmentConfig.count,
+          installmentConfig.isTotalAmount,
+          generateUUID
+        );
+        nextItems.push(...installmentItems);
+        if (authType === 'cloud' && isSupabaseConfigured()) {
+          for (const it of installmentItems) {
+            syncUpsertItem(currentUserId, it);
+          }
+        }
+      } else if (recurrence === 'once') {
         const newItem: CalendarItem = {
           ...baseItem,
           title: trimmedTitle,
@@ -771,6 +822,16 @@ export default function App() {
           }
         }
       }
+    } else if (itemToDelete.installment && scope === 'sequence') {
+      // Exclui todas as parcelas deste parcelamento
+      const targetGroupId = itemToDelete.installment.groupId;
+      nextItems = nextItems.filter(item => {
+        if (item.installment?.groupId === targetGroupId) {
+          if (authType === 'cloud') syncDeleteItem(currentUserId, item.id);
+          return false;
+        }
+        return true;
+      });
     } else if (scope === 'sequence' && itemToDelete.recurrenceId) {
       nextItems = nextItems.filter(item => {
         if (item.recurrenceId === itemToDelete.recurrenceId && item.date.getTime() >= itemToDelete.date.getTime()) {
@@ -1062,16 +1123,29 @@ export default function App() {
           </button>
         </div>
 
-        <button 
-          onClick={() => setIsFilterOpen(true)}
-          aria-label="Filtros"
-          className="p-2 text-gray-500 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors relative"
-        >
-          <Filter size={22} />
-          {(!filters.showAppointments || !filters.showFinances || filters.showPaidOnly || filters.showUnpaidOnly) && (
-            <span className="absolute top-2 right-2 w-2 h-2 bg-blue-500 rounded-full border border-white dark:border-gray-800" />
-          )}
-        </button>
+        <div className="flex items-center gap-1">
+          {/* Botão de Busca Global (Etapa 6) */}
+          <button 
+            type="button"
+            onClick={() => setIsSearchModalOpen(true)}
+            aria-label="Buscar na agenda (Ctrl + K)"
+            title="Buscar na agenda (Ctrl + K)"
+            className="p-2 text-gray-500 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors cursor-pointer"
+          >
+            <Search size={21} />
+          </button>
+
+          <button 
+            onClick={() => setIsFilterOpen(true)}
+            aria-label="Filtros"
+            className="p-2 text-gray-500 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors relative cursor-pointer"
+          >
+            <Filter size={22} />
+            {(!filters.showAppointments || !filters.showFinances || filters.showPaidOnly || filters.showUnpaidOnly || Boolean(filters.selectedCategory) || (filters.paymentStatusFilter && filters.paymentStatusFilter !== 'all')) && (
+              <span className="absolute top-2 right-2 w-2 h-2 bg-blue-500 rounded-full border border-white dark:border-gray-800" />
+            )}
+          </button>
+        </div>
       </header>
 
       {/* Main Calendar Area */}
@@ -1131,6 +1205,7 @@ export default function App() {
         notificationPermission={notificationPermission}
         onRequestNotificationPermission={handleRequestNotificationPermission}
         onOpenWhatsAppModal={() => setIsWhatsAppModalOpen(true)}
+        onOpenCategoryManager={() => setIsCategoryManagerOpen(true)}
       />
 
       <FilterMenu 
@@ -1138,6 +1213,7 @@ export default function App() {
         onClose={() => setIsFilterOpen(false)} 
         filters={filters}
         setFilters={setFilters}
+        customCategories={userProfile.customCategories}
       />
 
       {/* Day Details Drawer */}
@@ -1202,9 +1278,35 @@ export default function App() {
                       )}
                       
                       <div>
-                        <h4 className={clsx("font-semibold text-gray-800 dark:text-gray-100", item.isPaid && "line-through text-gray-400 dark:text-gray-500")}>
-                          {item.title}
-                        </h4>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className={clsx("font-semibold text-gray-800 dark:text-gray-100", item.isPaid && "line-through text-gray-400 dark:text-gray-500")}>
+                            {item.title}
+                          </h4>
+                          {/* Tag de Categoria */}
+                          {item.category && (() => {
+                            const cat = getCategoryById(item.category, userProfile.customCategories);
+                            return cat ? (
+                              <span 
+                                className="text-[10px] font-medium px-2 py-0.5 rounded-full text-white"
+                                style={{ backgroundColor: cat.color }}
+                              >
+                                {cat.name}
+                              </span>
+                            ) : null;
+                          })()}
+                          {/* Tag de Parcela */}
+                          {item.installment && (
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300">
+                              {item.installment.current}/{item.installment.total}
+                            </span>
+                          )}
+                          {/* Tag de Amortização Parcial */}
+                          {getPaymentStatus(item) === 'partial' && (
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">
+                              Parcial ({formatCurrency(getPaidAmountCents(item))} pago)
+                            </span>
+                          )}
+                        </div>
                         <div className="text-xs text-gray-500 dark:text-gray-400 flex gap-2">
                           {item.type === 'appointment' ? (
                             <span className="flex items-center gap-1">
@@ -1275,6 +1377,8 @@ export default function App() {
         editingItem={editingItem}
         existingItems={items}
         accountTimezone={accountTimezone}
+        customCategories={userProfile.customCategories}
+        onOpenCategoryManager={() => setIsCategoryManagerOpen(true)}
       />
 
       <DeleteModal 
@@ -1285,6 +1389,30 @@ export default function App() {
         }}
         onConfirm={handleConfirmDelete}
         isRecurring={Boolean(itemToDelete?.seriesId || itemToDelete?.recurrenceId)}
+        isInstallment={Boolean(itemToDelete?.installment)}
+      />
+
+      {/* Modal de Busca Global e Extrato (Etapa 6) */}
+      <SearchModal
+        isOpen={isSearchModalOpen}
+        onClose={() => setIsSearchModalOpen(false)}
+        items={allVisibleItems}
+        customCategories={userProfile.customCategories}
+        onEditItem={handleEditClick}
+        onTogglePaid={handleTogglePaid}
+      />
+
+      {/* Modal de Gerenciamento de Categorias (Etapa 6) */}
+      <CategoryManagerModal
+        isOpen={isCategoryManagerOpen}
+        onClose={() => setIsCategoryManagerOpen(false)}
+        customCategories={userProfile.customCategories || []}
+        onUpdateCustomCategories={(updatedCats) => {
+          handleUpdateProfile({
+            ...userProfile,
+            customCategories: updatedCats,
+          });
+        }}
       />
 
       {/* Modal de Importação Explícita de Dados Locais */}

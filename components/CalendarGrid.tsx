@@ -1,8 +1,8 @@
 import React from 'react';
 import { format, isSameMonth, isSameDay, isToday } from 'date-fns';
-import { ptBR } from 'date-fns/locale';
 import { CalendarItem, FilterState } from '../types';
 import { generateCalendarDays, formatDateToISO } from '../utils/dateUtils';
+import { getPaymentStatus } from '../utils/moneyUtils';
 import clsx from 'clsx';
 
 interface CalendarGridProps {
@@ -37,6 +37,7 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({ currentDate, items, 
           // Apply filters
           const visibleItems = dayItems.filter(item => {
              if (item.type === 'appointment') return filters.showAppointments;
+             
              // Finance logic
              const isFinance = item.type === 'income' || item.type === 'expense';
              if (!isFinance) return false;
@@ -45,8 +46,19 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({ currentDate, items, 
              if (item.type === 'income' && !filters.showIncome) return false;
              if (item.type === 'expense' && !filters.showExpenses) return false;
              
-             if (filters.showPaidOnly && !item.isPaid) return false;
-             if (filters.showUnpaidOnly && item.isPaid) return false;
+             // Filtro de Categoria
+             if (filters.selectedCategory && item.category !== filters.selectedCategory) {
+               return false;
+             }
+
+             // Filtro de Status de Pagamento
+             if (filters.paymentStatusFilter && filters.paymentStatusFilter !== 'all') {
+               const pStatus = getPaymentStatus(item);
+               if (pStatus !== filters.paymentStatusFilter) return false;
+             } else {
+               if (filters.showPaidOnly && !item.isPaid) return false;
+               if (filters.showUnpaidOnly && item.isPaid) return false;
+             }
              
              return true;
           });
@@ -63,7 +75,6 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({ currentDate, items, 
           });
 
           // Limit displayed items to prevent layout breaking
-          // On mobile, grid-rows-6 enforces height, so we must be careful.
           const MAX_VISIBLE = 4; 
           const displayItems = visibleItems.slice(0, MAX_VISIBLE);
           const hiddenCount = Math.max(0, visibleItems.length - MAX_VISIBLE);
@@ -92,26 +103,35 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({ currentDate, items, 
 
               {/* Items List */}
               <div className="flex flex-col gap-0.5 w-full overflow-hidden">
-                {displayItems.map((item) => (
+                {displayItems.map((item) => {
+                  const pStatus = getPaymentStatus(item);
+
+                  return (
                     <div 
-                        key={item.id}
-                        className={clsx(
-                            "w-full text-[9px] sm:text-[10px] leading-tight px-1 py-0.5 rounded-sm truncate text-white font-medium text-left shadow-sm",
-                            item.isPaid && "opacity-60 line-through decoration-white/70"
-                        )}
-                        style={{ 
-                            backgroundColor: item.type === 'appointment' 
-                                ? (item.color || '#3b82f6') 
-                                : (item.type === 'income' ? '#10b981' : '#ef4444') 
-                        }}
+                      key={item.id}
+                      className={clsx(
+                        "w-full text-[9px] sm:text-[10px] leading-tight px-1 py-0.5 rounded-sm truncate text-white font-medium text-left shadow-sm flex items-center justify-between",
+                        item.isPaid && "opacity-60 line-through decoration-white/70"
+                      )}
+                      style={{ 
+                        backgroundColor: item.type === 'appointment' 
+                          ? (item.color || '#3b82f6') 
+                          : (item.type === 'income' ? '#10b981' : '#ef4444') 
+                      }}
                     >
-                        {item.title}
+                      <span className="truncate">{item.title}</span>
+                      {pStatus === 'partial' && (
+                        <span className="ml-0.5 shrink-0 text-[8px] bg-amber-400 text-gray-900 font-bold px-0.5 rounded">
+                          ½
+                        </span>
+                      )}
                     </div>
-                ))}
+                  );
+                })}
                 {hiddenCount > 0 && (
-                    <div className="text-[9px] text-gray-400 dark:text-gray-500 font-medium leading-none mt-0.5">
-                        +{hiddenCount} mais
-                    </div>
+                  <div className="text-[9px] text-gray-400 dark:text-gray-500 font-medium leading-none mt-0.5">
+                    +{hiddenCount} mais
+                  </div>
                 )}
               </div>
             </button>

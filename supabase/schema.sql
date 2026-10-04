@@ -13,6 +13,7 @@ create table if not exists public.profiles (
   assistant_name text not null default 'Jarves',
   whatsapp text,
   whatsapp_notifications boolean not null default true,
+  custom_categories jsonb not null default '[]'::jsonb, -- Categorias customizadas do usuário (Etapa 6)
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -33,6 +34,9 @@ create table if not exists public.calendar_items (
   alert_minutes integer default 0,
   amount_cents bigint,    -- Centavos inteiros (R$ 33,50 = 3350)
   is_paid boolean default false,
+  category text,          -- Categoria personalizada (Etapa 6)
+  partial_payments jsonb not null default '[]'::jsonb, -- Amortizações parciais (Etapa 6)
+  installment jsonb,      -- Informações de parcelamento (Etapa 6)
   series_id uuid,         -- Chave estrangeira conceitual para séries recorrentes
   recurrence_id text,     -- Identificador legado para manter compatibilidade
   created_at timestamptz not null default now(),

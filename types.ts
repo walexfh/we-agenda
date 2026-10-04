@@ -32,6 +32,29 @@ export interface RecurrenceSeries {
   exceptions: Record<string, SeriesException>; // key: YYYY-MM-DD
 }
 
+export interface Category {
+  id: string;
+  name: string;
+  color: string;
+  icon?: string;
+  type: 'expense' | 'income' | 'both';
+}
+
+export interface PartialPayment {
+  id: string;
+  amountCents: number; // Integer cents amortized
+  dateStr: string;     // YYYY-MM-DD
+  notes?: string;
+  createdAt: string;   // ISO 8601
+}
+
+export interface InstallmentInfo {
+  current: number; // 1, 2, ..., N
+  total: number;   // Total count (e.g. 10)
+  groupId: string; // Identifier linking all installments of the same purchase
+  totalAmountCents?: number; // Total value of the installment plan
+}
+
 export interface CalendarItem {
   id: string;
   date: Date; // Normalized to start of day in local time
@@ -51,6 +74,11 @@ export interface CalendarItem {
   amountCents?: number; // Integer cents (e.g. 3350 for R$ 33,50)
   amount?: number;      // Deprecated float amount kept for backward migration
   isPaid?: boolean;
+  
+  // Etapa 6: Product & Financial Improvements
+  category?: string;              // Category ID or Name
+  partialPayments?: PartialPayment[]; // Partial amortizations
+  installment?: InstallmentInfo;  // Installment purchase metadata
   
   // Recurrence Tracking
   seriesId?: string;       // Series ID for recurring engine
@@ -85,13 +113,15 @@ export interface FilterState {
   showExpenses: boolean;
   showPaidOnly: boolean;
   showUnpaidOnly: boolean;
+  selectedCategory?: string; // Category ID or '' for all
+  paymentStatusFilter?: 'all' | 'paid' | 'unpaid' | 'partial';
 }
 
 export interface FinancialSummary {
-  incomeReceivedCents: number; // Receitas recebidas (pagas)
-  expensePaidCents: number;    // Despesas pagas (pagas)
-  incomePendingCents: number;  // Contas a receber (pendentes)
-  expensePendingCents: number; // Contas a pagar (pendentes)
+  incomeReceivedCents: number; // Receitas recebidas (pagas ou amortizadas)
+  expensePaidCents: number;    // Despesas pagas (pagas ou amortizadas)
+  incomePendingCents: number;  // Contas a receber (pendentes ou saldo residual)
+  expensePendingCents: number; // Contas a pagar (pendentes ou saldo residual)
   realizedResultCents: number; // incomeReceivedCents - expensePaidCents
   forecastResultCents: number; // (incomeReceivedCents + incomePendingCents) - (expensePaidCents + expensePendingCents)
 }
@@ -112,6 +142,7 @@ export interface UserProfile {
   assistantName?: string; // e.g. 'Jarves'
   whatsapp?: string; // e.g. '+5511999998888'
   whatsappNotifications?: boolean;
+  customCategories?: Category[];
 }
 
 export type AssistantIntentType = 

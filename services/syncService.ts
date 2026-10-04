@@ -25,7 +25,7 @@ export async function fetchCloudData(userId: string): Promise<CloudDataResult> {
     // 1. Carregar perfil
     const { data: profileData } = await supabase
       .from('profiles')
-      .select('name, avatar_url, timezone, assistant_name, whatsapp, whatsapp_notifications')
+      .select('name, avatar_url, timezone, assistant_name, whatsapp, whatsapp_notifications, custom_categories')
       .eq('id', userId)
       .maybeSingle();
 
@@ -36,6 +36,7 @@ export async function fetchCloudData(userId: string): Promise<CloudDataResult> {
       assistantName: profileData?.assistant_name || 'Jarves',
       whatsapp: profileData?.whatsapp || undefined,
       whatsappNotifications: profileData?.whatsapp_notifications ?? true,
+      customCategories: profileData?.custom_categories || [],
     };
 
     // 2. Carregar itens da agenda
@@ -61,6 +62,9 @@ export async function fetchCloudData(userId: string): Promise<CloudDataResult> {
       alertMinutes: row.alert_minutes || 0,
       amountCents: row.amount_cents !== null ? Number(row.amount_cents) : undefined,
       isPaid: Boolean(row.is_paid),
+      category: row.category || undefined,
+      partialPayments: row.partial_payments || [],
+      installment: row.installment || undefined,
       seriesId: row.series_id,
       recurrenceId: row.recurrence_id,
     }));
@@ -122,6 +126,9 @@ export async function syncUpsertItem(userId: string, item: CalendarItem): Promis
       alert_minutes: item.alertMinutes || 0,
       amount_cents: item.amountCents !== undefined ? item.amountCents : null,
       is_paid: Boolean(item.isPaid),
+      category: item.category || null,
+      partial_payments: item.partialPayments || [],
+      installment: item.installment || null,
       series_id: item.seriesId || null,
       recurrence_id: item.recurrenceId || null,
       updated_at: new Date().toISOString(),
@@ -233,6 +240,9 @@ export async function importLocalRecordsToCloud(
       alert_minutes: item.alertMinutes || 0,
       amount_cents: item.amountCents !== undefined ? item.amountCents : null,
       is_paid: Boolean(item.isPaid),
+      category: item.category || null,
+      partial_payments: item.partialPayments || [],
+      installment: item.installment || null,
       series_id: item.seriesId || null,
       recurrence_id: item.recurrenceId || null,
     }));

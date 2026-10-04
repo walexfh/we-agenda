@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { CalendarItem, UserProfile } from '../types';
-import { X, CheckSquare, Square, DollarSign, Wallet, Moon, Sun, User, Edit2, Check, LogOut, Globe, Bell, Bot, MessageSquare } from 'lucide-react';
+import { X, CheckSquare, Square, DollarSign, Wallet, Moon, Sun, User, Edit2, Check, LogOut, Globe, Bell, Bot, MessageSquare, Tag } from 'lucide-react';
 import { formatCurrency } from '../utils/moneyUtils';
 import { formatMonthYear } from '../utils/dateUtils';
 import { POPULAR_TIMEZONES } from '../utils/reminderUtils';
@@ -24,6 +24,7 @@ interface SideMenuProps {
   notificationPermission?: NotificationPermission | 'unsupported';
   onRequestNotificationPermission?: () => void;
   onOpenWhatsAppModal?: () => void;
+  onOpenCategoryManager?: () => void;
 }
 
 export const SideMenu: React.FC<SideMenuProps> = ({ 
@@ -41,7 +42,8 @@ export const SideMenu: React.FC<SideMenuProps> = ({
   onLogout,
   notificationPermission,
   onRequestNotificationPermission,
-  onOpenWhatsAppModal
+  onOpenWhatsAppModal,
+  onOpenCategoryManager,
 }) => {
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState(userProfile.name);
@@ -190,6 +192,23 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                 {userProfile.whatsapp ? 'Conectado ✓' : 'Configurar ›'}
               </span>
             </button>
+
+            {/* Gerenciar Categorias (Etapa 6) */}
+            {onOpenCategoryManager && (
+              <button
+                type="button"
+                onClick={onOpenCategoryManager}
+                className="w-full flex items-center justify-between p-2 mt-1 rounded-xl bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/40 text-purple-800 dark:text-purple-300 text-xs font-semibold hover:bg-purple-100 dark:hover:bg-purple-900/40 transition-colors cursor-pointer"
+              >
+                <span className="flex items-center gap-1.5">
+                  <Tag size={14} className="text-purple-600 dark:text-purple-400" />
+                  Categorias
+                </span>
+                <span className="text-[11px] text-purple-600 dark:text-purple-400 font-medium">
+                  Personalizar ›
+                </span>
+              </button>
+            )}
           </div>
         </div>
 

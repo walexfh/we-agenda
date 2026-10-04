@@ -198,3 +198,68 @@ export function legacyFloatToCents(floatVal: number | undefined | null): number 
   }
   return Math.round(floatVal * 100);
 }
+
+// -----------------------------------------------------------------------------
+// Etapa 6: Amortizações e Pagamentos Parciais
+// -----------------------------------------------------------------------------
+
+import type { CalendarItem } from '../types';
+
+/**
+ * Retorna o total pago/recebido em centavos para um item financeiro.
+ * Se houver amortizações registradas em partialPayments, soma todos os pagamentos.
+ * Caso contrário, se isPaid for true, retorna o valor total. Se false, 0.
+ */
+export function getPaidAmountCents(item: CalendarItem): number {
+  if (item.type !== 'income' && item.type !== 'expense') {
+    return 0;
+  }
+
+  const totalItemCents = item.amountCents || 0;
+
+  if (item.partialPayments && item.partialPayments.length > 0) {
+    const amortized = item.partialPayments.reduce((acc, p) => acc + (p.amountCents || 0), 0);
+    // Se o item estiver marcado como pago ou as amortizações cobrirem o total, garante o total
+    if (item.isPaid && amortized < totalItemCents) {
+      return totalItemCents;
+    }
+    return Math.min(amortized, totalItemCents);
+  }
+
+  return item.isPaid ? totalItemCents : 0;
+}
+
+/**
+ * Retorna o saldo pendente restante a pagar ou a receber em centavos.
+ */
+export function getRemainingAmountCents(item: CalendarItem): number {
+  if (item.type !== 'income' && item.type !== 'expense') {
+    return 0;
+  }
+
+  const totalItemCents = item.amountCents || 0;
+  const paidCents = getPaidAmountCents(item);
+
+  return Math.max(0, totalItemCents - paidCents);
+}
+
+/**
+ * Retorna o status de quitação de um item: 'paid' (pago), 'partial' (parcial) ou 'unpaid' (pendente).
+ */
+export function getPaymentStatus(item: CalendarItem): 'unpaid' | 'partial' | 'paid' {
+  if (item.type !== 'income' && item.type !== 'expense') {
+    return 'unpaid';
+  }
+
+  const total = item.amountCents || 0;
+  const paid = getPaidAmountCents(item);
+
+  if (item.isPaid || (total > 0 && paid >= total)) {
+    return 'paid';
+  }
+  if (paid > 0 && paid < total) {
+    return 'partial';
+  }
+  return 'unpaid';
+}
+

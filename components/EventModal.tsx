@@ -1,8 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { CalendarItem, ModalTabType, FinanceType, ItemType, RecurrenceType } from '../types';
-import { X, Calendar, DollarSign, Clock, Repeat, CheckCircle2, Circle, Bell, Layers, FileEdit, Info } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { CalendarItem, ModalTabType, FinanceType, ItemType, RecurrenceType, Category, PartialPayment } from '../types';
+import { 
+  X, Calendar, DollarSign, Clock, Repeat, CheckCircle2, Circle, Bell, 
+  Layers, FileEdit, Info, Tag, Plus, Trash2, CreditCard, ChevronDown 
+} from 'lucide-react';
 import { formatDateToISO, parseISODateToLocal, isEndTimeAfterStartTime } from '../utils/dateUtils';
-import { parseCurrencyInput, centsToInputString } from '../utils/moneyUtils';
+import { parseCurrencyInput, centsToInputString, formatCurrency } from '../utils/moneyUtils';
+import { getAllCategories } from '../utils/categoryUtils';
 
 interface EventModalProps {
   isOpen: boolean;
@@ -10,12 +14,15 @@ interface EventModalProps {
   onSave: (
     item: Omit<CalendarItem, 'id'>,
     recurrence: RecurrenceType,
-    editScope?: 'single' | 'sequence'
+    editScope?: 'single' | 'sequence',
+    installmentConfig?: { count: number; isTotalAmount: boolean }
   ) => boolean | Promise<boolean>;
   selectedDate: Date;
   editingItem?: CalendarItem | null;
   existingItems: CalendarItem[];
   accountTimezone?: string;
+  customCategories?: Category[];
+  onOpenCategoryManager?: () => void;
 }
 
 export const EventModal: React.FC<EventModalProps> = ({
@@ -25,6 +32,8 @@ export const EventModal: React.FC<EventModalProps> = ({
   selectedDate,
   editingItem,
   accountTimezone = 'America/Sao_Paulo',
+  customCategories,
+  onOpenCategoryManager,
 }) => {
   const [activeType, setActiveType] = useState<ModalTabType>('appointment');
   
@@ -47,10 +56,30 @@ export const EventModal: React.FC<EventModalProps> = ({
   const [amount, setAmount] = useState('');
   const [financeType, setFinanceType] = useState<FinanceType>('expense');
   const [isPaid, setIsPaid] = useState(false);
+  const [category, setCategory] = useState<string>('');
+
+  // Etapa 6: Parcelamento (Installments)
+  const [isInstallment, setIsInstallment] = useState(false);
+  const [installmentCount, setInstallmentCount] = useState(2);
+  const [isTotalAmount, setIsTotalAmount] = useState(true);
+
+  // Etapa 6: Amortizações / Pagamentos Parciais
+  const [partialPayments, setPartialPayments] = useState<PartialPayment[]>([]);
+  const [newPartialAmount, setNewPartialAmount] = useState('');
+  const [newPartialDate, setNewPartialDate] = useState('');
+  const [newPartialNote, setNewPartialNote] = useState('');
+  const [showAddPartial, setShowAddPartial] = useState(false);
+  const [partialError, setPartialError] = useState('');
 
   // Feedback State
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Categorias disponíveis filtradas pelo tipo
+  const allCategories = useMemo(() => getAllCategories(customCategories), [customCategories]);
+  const availableCategories = useMemo(() => {
+    return allCategories.filter(c => c.type === 'both' || c.type === financeType);
+  }, [allCategories, financeType]);
 
   // Close on Escape key
   useEffect(() => {
@@ -66,15 +95,25 @@ export const EventModal: React.FC<EventModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       setError('');
+      setPartialError('');
       setIsSubmitting(false);
+      setShowAddPartial(false);
+      setNewPartialAmount('');
+      setNewPartialNote('');
+
+      const todayISO = formatDateToISO(selectedDate);
+      setNewPartialDate(todayISO);
 
       if (editingItem) {
-        // Edit Mode: Populate fields
+        // Modo Edição
         setFormDate(editingItem.dateStr || formatDateToISO(editingItem.date));
         setTitle(editingItem.title);
         setDescription(editingItem.description || '');
         setRecurrence('once');
         setEditScope('single');
+        setCategory(editingItem.category || '');
+        setIsInstallment(false);
+        setPartialPayments(editingItem.partialPayments ? [...editingItem.partialPayments] : []);
         
         setAlertMinutes(editingItem.alertMinutes !== undefined ? editingItem.alertMinutes : -1);
         
@@ -91,7 +130,7 @@ export const EventModal: React.FC<EventModalProps> = ({
           setIsPaid(Boolean(editingItem.isPaid));
         }
       } else {
-        // Create Mode: Reset form
+        // Modo Criação
         setFormDate(formatDateToISO(selectedDate));
         setTitle('');
         setDescription('');
@@ -99,6 +138,11 @@ export const EventModal: React.FC<EventModalProps> = ({
         setRecurrence('once');
         setIsPaid(false);
         setFinanceType('expense');
+        setCategory('');
+        setIsInstallment(false);
+        setInstallmentCount(2);
+        setIsTotalAmount(true);
+        setPartialPayments([]);
         setAlertMinutes(-1);
         setStartTime('09:00');
         setEndTime('10:00');
@@ -111,13 +155,73 @@ export const EventModal: React.FC<EventModalProps> = ({
     if (newTab === activeType) return;
     setActiveType(newTab);
     setError('');
-    // Limpar campos específicos ao mudar de tipo para evitar inconsistências
     if (newTab === 'appointment') {
       setAmount('');
       setIsPaid(false);
+      setIsInstallment(false);
     } else {
       setStartTime('09:00');
       setEndTime('10:00');
+    }
+  };
+
+  // Cálculos de amortização
+  const parsedItemCents = useMemo(() => {
+    const res = parseCurrencyInput(amount);
+    return res.success ? (res.cents || 0) : 0;
+  }, [amount]);
+
+  const totalAmortizedCents = useMemo(() => {
+    return partialPayments.reduce((acc, p) => acc + (p.amountCents || 0), 0);
+  }, [partialPayments]);
+
+  const remainingBalanceCents = useMemo(() => {
+    return Math.max(0, parsedItemCents - totalAmortizedCents);
+  }, [parsedItemCents, totalAmortizedCents]);
+
+  const handleAddPartialPayment = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPartialError('');
+
+    const parsed = parseCurrencyInput(newPartialAmount);
+    if (!parsed.success || !parsed.cents || parsed.cents <= 0) {
+      setPartialError(parsed.error || 'Informe um valor válido para amortização.');
+      return;
+    }
+
+    if (!newPartialDate) {
+      setPartialError('Informe a data do pagamento.');
+      return;
+    }
+
+    const newPayment: PartialPayment = {
+      id: `part-${Date.now()}`,
+      amountCents: parsed.cents,
+      dateStr: newPartialDate,
+      notes: newPartialNote.trim() || undefined,
+      createdAt: new Date().toISOString(),
+    };
+
+    const updatedPayments = [...partialPayments, newPayment];
+    setPartialPayments(updatedPayments);
+
+    // Se o total amortizado quitar o valor integral do item, marca como pago automaticamente
+    const newAmortized = updatedPayments.reduce((acc, p) => acc + p.amountCents, 0);
+    if (parsedItemCents > 0 && newAmortized >= parsedItemCents) {
+      setIsPaid(true);
+    }
+
+    setNewPartialAmount('');
+    setNewPartialNote('');
+    setShowAddPartial(false);
+  };
+
+  const handleRemovePartialPayment = (paymentId: string) => {
+    const updated = partialPayments.filter(p => p.id !== paymentId);
+    setPartialPayments(updated);
+    const newAmortized = updated.reduce((acc, p) => acc + p.amountCents, 0);
+    if (parsedItemCents > 0 && newAmortized < parsedItemCents) {
+      setIsPaid(false);
     }
   };
 
@@ -178,10 +282,15 @@ export const EventModal: React.FC<EventModalProps> = ({
         alertMinutes: alertMinutes >= 0 ? alertMinutes : undefined,
         amountCents: activeType === 'finance' ? amountCents : undefined,
         isPaid: activeType === 'finance' ? isPaid : undefined,
+        category: activeType === 'finance' ? (category || undefined) : undefined,
+        partialPayments: activeType === 'finance' && partialPayments.length > 0 ? partialPayments : undefined,
       };
 
-      const success = await onSave(newItem, recurrence, editScope);
-      // O formulário só fecha após gravação bem-sucedida
+      const installmentConfig = (!editingItem && isInstallment && activeType === 'finance')
+        ? { count: installmentCount, isTotalAmount }
+        : undefined;
+
+      const success = await onSave(newItem, recurrence, editScope, installmentConfig);
       if (success !== false) {
         onClose();
       }
@@ -205,7 +314,7 @@ export const EventModal: React.FC<EventModalProps> = ({
     >
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       
-      <div className="relative w-full max-w-md bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="relative w-full max-w-lg bg-white dark:bg-gray-900 rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         
         {/* Header / Type Switcher */}
         <div className="flex border-b dark:border-gray-800">
@@ -231,63 +340,70 @@ export const EventModal: React.FC<EventModalProps> = ({
           >
             <DollarSign size={18} /> Finanças
           </button>
-          <button
-            onClick={onClose}
-            aria-label="Fechar janela"
-            className="absolute right-2 top-2 p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-full"
-          >
-            <X size={20} />
-          </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto no-scrollbar space-y-5 dark:text-gray-200">
+        {/* Form Body */}
+        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-4">
           
           {error && (
-            <div className="p-3 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 rounded-xl text-red-600 dark:text-red-400 text-sm">
+            <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 rounded-xl text-red-600 dark:text-red-400 text-sm">
               {error}
             </div>
           )}
 
-          {/* Date Input */}
+          {/* Date Picker */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Data <span className="text-red-500">*</span>
             </label>
-            <div className="relative">
-              <Calendar className="absolute left-3 top-3 text-gray-400" size={16} />
-              <input
-                type="date"
-                required
-                value={formDate}
-                onChange={(e) => setFormDate(e.target.value)}
-                className="w-full pl-9 p-3 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50 dark:bg-gray-800 dark:text-white appearance-none"
-              />
-            </div>
+            <input
+              required
+              type="date"
+              value={formDate}
+              onChange={(e) => setFormDate(e.target.value)}
+              className="w-full p-3 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50 dark:bg-gray-800 dark:text-white"
+            />
           </div>
 
-          {/* Type Specific Fields */}
           {activeType === 'appointment' ? (
+            /* ========================================================================= */
+            /* APPOINTMENT FIELDS                                                        */
+            /* ========================================================================= */
             <>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Título <span className="text-red-500">*</span>
+                  Título do Compromisso <span className="text-red-500">*</span>
                 </label>
                 <input
                   required
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Ex: Reunião, Dentista, Consulta..."
+                  placeholder="Ex: Reunião de Alinhamento, Dentista..."
                   className="w-full p-3 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50 dark:bg-gray-800 dark:text-white"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Descrição (Opcional)
+                </label>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Pauta da reunião, endereço ou notas adicionais..."
+                  rows={2}
+                  className="w-full p-3 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50 dark:bg-gray-800 dark:text-white resize-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Início</label>
                   <div className="relative">
                     <Clock className="absolute left-3 top-3 text-gray-400" size={16} />
                     <input
+                      required
                       type="time"
                       value={startTime}
                       onChange={(e) => setStartTime(e.target.value)}
@@ -296,10 +412,11 @@ export const EventModal: React.FC<EventModalProps> = ({
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Fim</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Término</label>
                   <div className="relative">
                     <Clock className="absolute left-3 top-3 text-gray-400" size={16} />
                     <input
+                      required
                       type="time"
                       value={endTime}
                       onChange={(e) => setEndTime(e.target.value)}
@@ -307,10 +424,6 @@ export const EventModal: React.FC<EventModalProps> = ({
                     />
                   </div>
                 </div>
-              </div>
-
-              <div className="text-[11px] text-gray-500 dark:text-gray-400">
-                * Nesta versão, o término deve ser posterior ao início no mesmo dia.
               </div>
 
               <div>
@@ -323,7 +436,7 @@ export const EventModal: React.FC<EventModalProps> = ({
                     className="w-full pl-9 p-3 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50 dark:bg-gray-800 dark:text-white appearance-none"
                   >
                     <option value={-1}>Sem lembrete</option>
-                    <option value={0}>No horário do compromisso</option>
+                    <option value={0}>No horário do evento</option>
                     <option value={5}>5 minutos antes</option>
                     <option value={10}>10 minutos antes</option>
                     <option value={15}>15 minutos antes</option>
@@ -333,20 +446,15 @@ export const EventModal: React.FC<EventModalProps> = ({
                     <option value={1440}>1 dia antes</option>
                   </select>
                 </div>
-                <div className="flex items-center gap-1.5 mt-1.5 text-xs text-blue-600 dark:text-blue-400">
-                  <Info size={13} className="shrink-0" />
-                  <span>Fuso: {accountTimezone} • Notificação ativa</span>
-                </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Cor</label>
-                <div className="flex gap-3 overflow-x-auto pb-2">
-                  {['#3b82f6', '#06b6d4', '#4f46e5', '#8b5cf6', '#ec4899', '#f59e0b', '#6b7280'].map((c) => (
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Cor do Evento</label>
+                <div className="flex gap-2">
+                  {['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'].map((c) => (
                     <button
                       key={c}
                       type="button"
-                      aria-label={`Cor ${c}`}
                       onClick={() => setColor(c)}
                       className={`w-8 h-8 rounded-full border-2 transition-transform ${
                         color === c ? 'border-gray-900 dark:border-white scale-110' : 'border-transparent'
@@ -358,6 +466,9 @@ export const EventModal: React.FC<EventModalProps> = ({
               </div>
             </>
           ) : (
+            /* ========================================================================= */
+            /* FINANCE FIELDS                                                            */
+            /* ========================================================================= */
             <>
               <div className="flex gap-3 mb-2">
                 <button
@@ -416,6 +527,38 @@ export const EventModal: React.FC<EventModalProps> = ({
                 />
               </div>
 
+              {/* Seletor de Categoria (Etapa 6) */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                    <Tag size={14} className="text-purple-600 dark:text-purple-400" /> Categoria
+                  </label>
+                  {onOpenCategoryManager && (
+                    <button
+                      type="button"
+                      onClick={onOpenCategoryManager}
+                      className="text-xs text-purple-600 dark:text-purple-400 hover:underline font-medium"
+                    >
+                      + Gerenciar
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <select
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    className="w-full p-3 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none bg-gray-50 dark:bg-gray-800 dark:text-white appearance-none"
+                  >
+                    <option value="">Sem categoria definida</option>
+                    {availableCategories.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={18} className="absolute right-3 top-3.5 text-gray-400 pointer-events-none" />
+                </div>
+              </div>
+
+              {/* Status de Quitação Total */}
               <button
                 type="button"
                 onClick={() => setIsPaid(!isPaid)}
@@ -424,11 +567,12 @@ export const EventModal: React.FC<EventModalProps> = ({
                 {isPaid ? <CheckCircle2 className="text-emerald-500" /> : <Circle className="text-gray-300 dark:text-gray-600" />}
                 <span className={`font-medium ${isPaid ? 'text-gray-900 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}>
                   {isPaid
-                    ? financeType === 'income' ? 'Recebido' : 'Pago'
+                    ? financeType === 'income' ? 'Totalmente Recebido' : 'Totalmente Pago'
                     : financeType === 'income' ? 'Pendente de recebimento (A receber)' : 'Pendente de pagamento (A pagar)'}
                 </span>
               </button>
 
+              {/* Lembrete de Vencimento */}
               {!isPaid && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -455,11 +599,177 @@ export const EventModal: React.FC<EventModalProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* Seção de Amortizações e Pagamentos Parciais para Edição (Etapa 6) */}
+              {editingItem && (
+                <div className="p-4 bg-gray-50 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">
+                        Amortizações & Pagamentos Parciais
+                      </h4>
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        Pago: <span className="font-semibold text-emerald-600">{formatCurrency(totalAmortizedCents)}</span> • 
+                        Restante: <span className="font-semibold text-red-500">{formatCurrency(remainingBalanceCents)}</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddPartial(!showAddPartial)}
+                      className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 hover:bg-purple-200 transition-colors"
+                    >
+                      {showAddPartial ? 'Cancelar' : '+ Amortizar'}
+                    </button>
+                  </div>
+
+                  {/* Barra de Progresso de Quitação */}
+                  {parsedItemCents > 0 && (
+                    <div className="w-full bg-gray-200 dark:bg-gray-700 h-2 rounded-full overflow-hidden">
+                      <div 
+                        className="bg-emerald-500 h-full transition-all duration-300"
+                        style={{ width: `${Math.min(100, Math.round((totalAmortizedCents / parsedItemCents) * 100))}%` }}
+                      />
+                    </div>
+                  )}
+
+                  {/* Formulário de Adicionar Pagamento Parcial */}
+                  {showAddPartial && (
+                    <div className="p-3 bg-white dark:bg-gray-800 rounded-lg border border-purple-200 dark:border-purple-800 space-y-2.5">
+                      <div className="text-xs font-semibold text-purple-700 dark:text-purple-300">
+                        Novo Pagamento Parcial
+                      </div>
+                      {partialError && (
+                        <div className="text-xs text-red-600 bg-red-50 p-1.5 rounded">{partialError}</div>
+                      )}
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={newPartialAmount}
+                          onChange={(e) => setNewPartialAmount(e.target.value)}
+                          placeholder="Valor (R$)"
+                          className="p-2 text-xs border rounded-lg dark:bg-gray-900 dark:border-gray-700 dark:text-white"
+                        />
+                        <input
+                          type="date"
+                          value={newPartialDate}
+                          onChange={(e) => setNewPartialDate(e.target.value)}
+                          className="p-2 text-xs border rounded-lg dark:bg-gray-900 dark:border-gray-700 dark:text-white"
+                        />
+                      </div>
+                      <input
+                        type="text"
+                        value={newPartialNote}
+                        onChange={(e) => setNewPartialNote(e.target.value)}
+                        placeholder="Observação (Ex: Pix 1ª parcela, dinheiro...)"
+                        className="w-full p-2 text-xs border rounded-lg dark:bg-gray-900 dark:border-gray-700 dark:text-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddPartialPayment}
+                        className="w-full py-1.5 bg-purple-600 text-white text-xs font-semibold rounded-lg hover:bg-purple-700"
+                      >
+                        Confirmar Amortização
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Histórico de Amortizações */}
+                  {partialPayments.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      {partialPayments.map(p => (
+                        <div 
+                          key={p.id}
+                          className="flex items-center justify-between text-xs p-2 rounded-lg bg-white dark:bg-gray-800/80 border border-gray-100 dark:border-gray-700"
+                        >
+                          <div>
+                            <span className="font-semibold text-emerald-600">{formatCurrency(p.amountCents)}</span>
+                            <span className="text-gray-400 ml-2">({p.dateStr})</span>
+                            {p.notes && <span className="text-gray-500 dark:text-gray-400 ml-1.5">- {p.notes}</span>}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemovePartialPayment(p.id)}
+                            className="text-gray-400 hover:text-red-500 p-1"
+                            title="Excluir amortização"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Parcelamento de Compras (Novo Lançamento) (Etapa 6) */}
+              {!editingItem && (
+                <div className="p-3.5 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-700 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CreditCard size={18} className="text-purple-600 dark:text-purple-400" />
+                      <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                        Parcelar Lançamento
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsInstallment(!isInstallment)}
+                      className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
+                        isInstallment ? 'bg-purple-600' : 'bg-gray-300 dark:bg-gray-600'
+                      }`}
+                    >
+                      <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                        isInstallment ? 'translate-x-5' : 'translate-x-0'
+                      }`} />
+                    </button>
+                  </div>
+
+                  {isInstallment && (
+                    <div className="space-y-3 pt-2 border-t border-gray-200 dark:border-gray-700 animate-in fade-in duration-200">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                            Número de Parcelas
+                          </label>
+                          <select
+                            value={installmentCount}
+                            onChange={(e) => setInstallmentCount(Number(e.target.value))}
+                            className="w-full p-2.5 text-sm border border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-900 dark:text-white"
+                          >
+                            {Array.from({ length: 71 }, (_, i) => i + 2).map(n => (
+                              <option key={n} value={n}>{n}x</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                            O Valor Digitado é:
+                          </label>
+                          <select
+                            value={isTotalAmount ? 'total' : 'per_installment'}
+                            onChange={(e) => setIsTotalAmount(e.target.value === 'total')}
+                            className="w-full p-2.5 text-sm border border-gray-200 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-900 dark:text-white"
+                          >
+                            <option value="total">Valor Total a Dividir</option>
+                            <option value="per_installment">Valor por Parcela</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                        * Serão gerados {installmentCount} lançamentos mensais com controle automático de vencimentos e centavos exatos.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           )}
 
-          {/* Recurrence Options for NEW items */}
-          {!editingItem && (
+          {/* Opções de Recorrência para Novos Itens (Se não for parcelamento) */}
+          {!editingItem && !isInstallment && (
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Frequência</label>
               <div className="relative">
@@ -484,7 +794,7 @@ export const EventModal: React.FC<EventModalProps> = ({
             </div>
           )}
 
-          {/* Recurrence Scope for EDITING recurring items */}
+          {/* Escopo de Edição para Séries Recorrentes */}
           {isRecurringEdit && (
             <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl border border-blue-100 dark:border-blue-900/50">
               <label className="block text-sm font-medium text-blue-800 dark:text-blue-300 mb-2">
@@ -539,6 +849,8 @@ export const EventModal: React.FC<EventModalProps> = ({
               : `${editingItem ? 'Atualizar' : 'Salvar'} ${
                   activeType === 'appointment'
                     ? 'Compromisso'
+                    : isInstallment
+                    ? `Parcelamento em ${installmentCount}x`
                     : financeType === 'income'
                     ? 'Receita'
                     : 'Despesa'

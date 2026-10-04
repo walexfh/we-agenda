@@ -409,13 +409,97 @@ Este documento registra o diagnóstico, decisões técnicas, implementação, va
 
 ---
 
-### 4. Próximas Etapas
+---
 
-- **Etapa 6 — Melhorias de Produto e Produtividade Financeira:**
-  - Categorias personalizadas para receitas e despesas com cores e ícones customizáveis.
-  - Pagamentos e recebimentos parciais de contas a pagar e a receber com histórico de amortizações.
-  - Parcelamento de compras e lançamentos (ex: compra em 12x no cartão com datas e vencimentos automáticos).
-  - Busca global e filtros avançados por período, status, categoria e tipo de lançamento.
+## Etapa 6 — Melhorias de Produto e Produtividade Financeira
+
+### 1. Diagnóstico e Arquitetura da Etapa 6
+
+1. **Categorias Personalizadas para Receitas e Despesas ([utils/categoryUtils.ts](file:///c:/Users/wnet4/Downloads/w&e.agenda/utils/categoryUtils.ts) e [components/CategoryManagerModal.tsx](file:///c:/Users/wnet4/Downloads/w&e.agenda/components/CategoryManagerModal.tsx)):**
+   - Criação da interface `Category` com suporte a identificador único, nome, cor hexadecimal e escopo (`expense`, `income` ou `both`).
+   - Fornecimento de 13 categorias padrão do sistema (Alimentação, Moradia, Transporte, Saúde, Educação, Lazer, Serviços, Salário, Freelance, Investimentos, Vendas, etc.).
+   - Modal dedicado [CategoryManagerModal.tsx](file:///c:/Users/wnet4/Downloads/w&e.agenda/components/CategoryManagerModal.tsx) para o usuário criar, visualizar e remover categorias customizadas com seletor de paleta de cores.
+   - Sincronização em nuvem na coluna `custom_categories jsonb` da tabela `profiles` e persistência na coluna `category text` da tabela `calendar_items`.
+   - Seletor de categorias visual no [EventModal.tsx](file:///c:/Users/wnet4/Downloads/w&e.agenda/components/EventModal.tsx), pills coloridas no [CalendarGrid.tsx](file:///c:/Users/wnet4/Downloads/w&e.agenda/components/CalendarGrid.tsx) e no Drawer de detalhes do dia.
+
+2. **Pagamentos e Recebimentos Parciais / Amortizações ([utils/moneyUtils.ts](file:///c:/Users/wnet4/Downloads/w&e.agenda/utils/moneyUtils.ts)):**
+   - Criação da interface `PartialPayment` vinculada ao `CalendarItem.partialPayments` com valor amortizado em centavos inteiros, data de liquidação e observações (ex: "Pago via Pix").
+   - Métodos utilitários de alta precisão:
+     - `getPaidAmountCents(item)`: Retorna o total pago ou a soma das amortizações.
+     - `getRemainingAmountCents(item)`: Retorna o saldo residual devedor ou a receber.
+     - `getPaymentStatus(item)`: Classifica o lançamento com exatidão em `unpaid` (pendente), `partial` (parcialmente pago) ou `paid` (quitado).
+   - Gerenciador visual de amortizações integrado ao modo de edição do [EventModal.tsx](file:///c:/Users/wnet4/Downloads/w&e.agenda/components/EventModal.tsx), com barra de progresso percentual, lista de amortizações com botão de exclusão e marcação automática como quitado quando atinge 100%.
+   - Atualização do cálculo do balanço financeiro (`monthlySummary`), computando amortizações parciais como receitas/despesas já realizadas e saldos restantes como previstos.
+
+3. **Parcelamento de Compras e Lançamentos ([utils/installmentUtils.ts](file:///c:/Users/wnet4/Downloads/w&e.agenda/utils/installmentUtils.ts)):**
+   - Criação de gerador de parcelas mensais de 2x a 72x com garantia de centavos exatos (sem perda por arredondamento; eventuais restos da divisão inteira são computados na 1ª parcela).
+   - Cálculo automático de vencimentos mês a mês respeitando o clamping do dia 31 (ex: Jan 31 → Fev 28/29 → Mar 31).
+   - Vinculação por `InstallmentInfo` (`groupId`, `current`, `total`, `totalAmountCents`) e títulos sequenciais automáticos (ex: *"Notebook Dell (1/10)"*).
+   - Exclusão com escopo inteligente no [DeleteModal.tsx](file:///c:/Users/wnet4/Downloads/w&e.agenda/components/DeleteModal.tsx): permite escolher entre *"Apenas esta parcela"* ou *"Todas as parcelas deste parcelamento"*.
+
+4. **Busca Global e Extrato com Filtros Avançados ([components/SearchModal.tsx](file:///c:/Users/wnet4/Downloads/w&e.agenda/components/SearchModal.tsx)):**
+   - Interface rápida de busca acessível pelo botão de lupa no cabeçalho ou pelo atalho de teclado global **`Ctrl + K` / `Cmd + K`**.
+   - Filtro em tempo real por termo textual (busca em títulos, descrições e nomes de categorias).
+   - Filtros combinados por Tipo (`Todos`, `Compromissos`, `Receitas`, `Despesas`), Status (`Todos`, `Pagos`, `Pendentes`, `Parciais`), Categoria e Período (`Todos`, `Mês Atual`, `Próximos 7 Dias`, `Próximos 30 Dias`, `Este Ano`).
+   - Painel de totalizadores do filtro (Total Receitas, Total Despesas e Saldo Líquido do extrato).
+   - Ações diretas nos cartões de resultado (alternar pago/pendente em 1 clique e editar lançamento).
+
+---
+
+### 2. Arquivos Alterados e Criados na Etapa 6
+
+| Arquivo | Motivo da Alteração | Status |
+|---|---|---|
+| `types.ts` | Definição de `Category`, `PartialPayment`, `InstallmentInfo` e novos campos em `CalendarItem`, `UserProfile` e `FilterState` | Concluído |
+| `utils/categoryUtils.ts` | Coleção de categorias padrão, mesclagem com customizadas, validação e busca | Concluído |
+| `utils/installmentUtils.ts` | Cálculo de parcelamento com centavos exatos e geração de lançamentos mensais com clamping | Concluído |
+| `utils/moneyUtils.ts` | Métodos `getPaidAmountCents`, `getRemainingAmountCents` e `getPaymentStatus` | Concluído |
+| `components/CategoryManagerModal.tsx` | Interface de gerenciamento e customização de categorias com paleta de cores | Concluído |
+| `components/SearchModal.tsx` | Modal de busca global, extrato filtrado e atalho `Ctrl+K` | Concluído |
+| `components/EventModal.tsx` | Seletor de categorias, toggle de parcelamento em compras e editor de amortizações parciais | Concluído |
+| `components/FilterMenu.tsx` | Filtro por categoria e status de quitação (todos, pagos, parciais, pendentes) | Concluído |
+| `components/CalendarGrid.tsx` | Exibição de indicador de amortização parcial e respeito aos filtros de categoria e status | Concluído |
+| `components/DeleteModal.tsx` | Suporte a exclusão de parcela individual ou de todo o grupo de parcelamento | Concluído |
+| `components/SideMenu.tsx` | Botão de acesso ao gerenciador de categorias | Concluído |
+| `services/syncService.ts` | Sincronização em nuvem de `category`, `partial_payments`, `installment` e `custom_categories` | Concluído |
+| `supabase/schema.sql` | Colunas `category`, `partial_payments`, `installment` em `calendar_items` e `custom_categories` em `profiles` | Concluído |
+| `App.tsx` | Integração de estados, atalho `Ctrl+K`, cálculo de balanço amortizado, botão de busca e novos modais | Concluído |
+| `tests/categoryUtils.test.ts` | Testes de categorias padrão, mesclagem de personalizadas e validações | Concluído |
+| `tests/installmentUtils.test.ts` | Testes de divisão exata de centavos e geração de parcelas com clamping de dia 31 | Concluído |
+| `tests/partialPayments.test.ts` | Testes de amortização parcial, quitação gradual e saldo residual devedor | Concluído |
+
+---
+
+### 3. Validação e Testes da Etapa 6
+
+#### A. Verificação TypeScript (`npm run typecheck`)
+- **Comando:** `node ./node_modules/typescript/bin/tsc --noEmit`
+- **Resultado:** **0 erros**. Compilação 100% limpa em todo o código TypeScript do projeto.
+
+#### B. Testes Automatizados Unitários (`npm run test`)
+- **Ferramenta:** Vitest v3.2.7
+- **Resultado:** **59 testes em 14 arquivos com 100% de aprovação**.
+  - `tests/categoryUtils.test.ts`: 4 testes aprovados.
+  - `tests/installmentUtils.test.ts`: 3 testes aprovados.
+  - `tests/partialPayments.test.ts`: 4 testes aprovados.
+  - Demais 48 testes das Etapas 1 a 5 mantidos com 100% de aprovação (WhatsApp, Jarves IA, lembretes, finanças, recorrências, storage e auth).
+
+#### C. Build de Produção (`npm run build`)
+- **Comando:** `tsc --noEmit && vite build`
+- **Resultado:** Build concluído com sucesso em 19.90s gerando bundle otimizado em `dist/`.
+
+---
+
+### 4. Status de Conclusão Geral do Projeto
+
+Todas as 6 etapas planejadas para a evolução do **W&E.Agenda** foram implementadas, testadas e validadas:
+- **Etapa 1:** Fundação local, precisão em centavos inteiros, motor de recorrência com clamping de dia 31, recuperação de corrupção e resumo financeiro realizado vs. previsto.
+- **Etapa 2:** Autenticação com e-mail verificado, sincronização em nuvem Supabase PostgreSQL com RLS, isolamento por usuário e migração explícita.
+- **Etapa 3:** Fuso horário de conta, lembretes reais com antecipação configurável, fila de notificações no banco com procedimento SQL concorrente, Web Push Service Worker e watcher in-app.
+- **Etapa 4:** Assistente pessoal com nome personalizável (Jarves), NLU determinístico para despesas imediatas (*"Jarves, gastei 33 reais no mercado"*), compromissos e receitas, com garantia transacional estrita (gravação confirmada antes da resposta) e entrada por voz via Web Speech API.
+- **Etapa 5:** Integração oficial com WhatsApp por texto e áudio, normalização E.164, transcrição automática, Edge Function de webhook transacional e despacho de lembretes para o WhatsApp.
+- **Etapa 6:** Melhorias de produto com categorias personalizadas, amortizações parciais com histórico, parcelamento de compras no cartão com centavos exatos e busca global instantânea com atalho `Ctrl+K`.
+
 
 
 
