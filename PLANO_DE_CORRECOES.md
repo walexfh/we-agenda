@@ -10,7 +10,7 @@ Este documento registra o diagnóstico, decisões técnicas, implementação, va
 
 #### A. Persistência e Segurança dos Dados
 - **Armazenamento:** Realizado diretamente no `localStorage` por chaves (`fincal_current_user`, `fincal_items_${user}`, `fincal_profile_${user}`, `fincal_users`, `fincal_theme`).
-- **Problema de Corrupção Silenciosa:** `JSON.parse` envolto em `try/catch` que retornava `INITIAL_ITEMS` (`[]`). Qualquer erro de parse (ex.: corrupção acidental ou truncamento) causava perda imediata dos dados na gravação subsequente.
+- **Problema de Corrupção Silenciosa:** `JSON.parse` envolto em `try/catch` que retornava `INITIAL_ITEMS` (`[]`). Qualquer erro de parse causava perda imediata dos dados na gravação subsequente.
 - **Armazenamento de Senhas:** O componente `LoginScreen` criava usuários salvando senhas em texto puro no `localStorage` (`fincal_users`).
 - **Exposição de Segredos:** `vite.config.ts` injetava `GEMINI_API_KEY` no bundle cliente via `define: { 'process.env.API_KEY': ..., 'process.env.GEMINI_API_KEY': ... }`, mesmo sem uso no frontend.
 - **Gravação sem Confirmação:** O modal de criação/edição fechava antes de confirmar o sucesso da persistência.
@@ -20,13 +20,13 @@ Este documento registra o diagnóstico, decisões técnicas, implementação, va
 - **Scripts Ausentes:** Não havia comando `typecheck` e o build (`vite build`) não executava verificação de tipos (`tsc`).
 - **Dependências de Tipos Ausentes:** `@types/react` e `@types/react-dom` não constavam em `devDependencies`.
 - **CSS Ausente:** `index.html` referenciava `<link rel="stylesheet" href="/index.css">`, porém `index.css` não existia no projeto.
-- **Tailwind por CDN:** Utilizava script externo `https://cdn.tailwindcss.com`, dependente de conexão externa e inadequado para builds locais previsíveis.
+- **Tailwind por CDN:** Utilizava script externo `https://cdn.tailwindcss.com`, inadequado para builds locais previsíveis.
 - **Importmap Redundante:** `index.html` continha `<script type="importmap">` apontando para `esm.sh`, concorrendo com o empacotamento do Vite.
 - **Lockfile Ausente:** Não havia `package-lock.json` no repositório.
 
 #### C. Valores Financeiros
 - **Valores em Ponto Flutuante:** `CalendarItem.amount` era armazenado como float (`number`), sujeito a imprecisão de arredondamento binário e inconsistência de centavos.
-- **Parser Frágil:** Uso de `parseFloat(amount.replace(/\./g, '').replace(',', '.'))` sem validação de valores negativos, NaN, infinitos ou múltiplos separadores.
+- **Parser Frágil:** Uso de `parseFloat` sem validação de valores negativos, NaN, infinitos ou múltiplos separadores.
 - **Falta de Diferenciação:** O valor armazenado não era claramente diferenciado do texto digitado no formulário.
 
 #### D. Resumo Financeiro
@@ -43,7 +43,7 @@ Este documento registra o diagnóstico, decisões técnicas, implementação, va
 - **Identificadores:** IDs gerados com `Date.now().toString()`, propensos a colisão em criação rápida.
 - **Fuso Horário:** Datas manipuladas com `new Date(string)` gerando deslocamento de fuso (UTC midnight interpretado como dia anterior no fuso local Brasil GMT-3).
 - **Recorrência Limitada:** `generateRecurringItems` gerava um lote fixo de 12 itens no momento do salvamento inicial.
-- **Edição em Cascata Falha:** `timeDiff` baseado em milissegundos causava desvios em meses com quantidade diferente de dias (ex.: 28, 30 e 31).
+- **Edição em Cascata Falha:** `timeDiff` baseado em milissegundos causava desvios em meses com quantidade diferente de dias.
 - **Falta de Tratamento de Fim de Mês:** Recorrência mensal criada no dia 31 avançava para março ou pulava dias em meses com menos de 31 dias.
 
 #### G. Lembretes e Interface
@@ -98,27 +98,65 @@ Este documento registra o diagnóstico, decisões técnicas, implementação, va
 
 ---
 
-### 3. Progresso das Correções e Arquivos Alterados
+## Etapa 2 — Conta Real e Sincronização
+
+### 1. Diagnóstico e Arquitetura da Etapa 2
+
+- **Provedor Escolhido:** **Supabase** (PostgreSQL relacional, Auth nativo, Row Level Security e Realtime).
+- **Segurança Absoluta no Frontend:** Apenas a chave pública `anon` é utilizada no cliente. A chave `service_role` (privilegiada) nunca é colocada no frontend.
+- **Row Level Security (RLS):** Toda a autorização de dados é garantida no banco de dados através da função nativa `auth.uid() = user_id`, impossibilitando que qualquer requisição maliciosa ou manipulada no frontend acerte registros de outro usuário.
+- **Tratamento de Credenciais Ausentes:** Conforme regra de não simular integrações concluídas, caso as variáveis `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` não estejam configuradas em `.env.local`, a aplicação exibe orientações transparentes de configuração e permite continuar operando sem bloqueios no Modo Local de Demonstração.
+- **Importação Explícita e Não-Destrutiva:** Desenvolvido assistente que detecta registros legados ou criados localmente no navegador e solicita confirmação explícita do usuário para migrá-los para a nuvem sob seu `auth.uid()`, sem duplicidade e sem copiar senhas.
+
+### 2. Decisões Técnicas da Etapa 2
+
+1. **Esquema de Banco e Migração SQL (`supabase/schema.sql`):**
+   - Criação da tabela `profiles` vinculada a `auth.users(id)` com trigger automática para criação de perfil.
+   - Criação da tabela `calendar_items` com campos fortemente tipados (`date_str`, `amount_cents`, `is_paid`, etc.).
+   - Criação da tabela `recurrence_series` com suporte a template JSONB e exceções.
+   - Políticas RLS rigorosas para SELECT, INSERT, UPDATE e DELETE.
+   - Índices compostos `(user_id, date_str)` para buscas velozes no calendário.
+
+2. **Serviço de Autenticação Segura (`services/authService.ts`):**
+   - Cadastro com validação de formato de e-mail e senha mínima de 6 caracteres.
+   - Detecção de necessidade de confirmação de e-mail (caso o projeto Supabase exija verificação).
+   - Fluxo de recuperação de senha oficial via `resetPasswordForEmail`.
+   - Atualização de senha e encerramento de sessão seguro.
+
+3. **Serviço de Sincronização e Nuvem (`services/syncService.ts`):**
+   - Sincronização bidirecional entre cliente e nuvem.
+   - Suporte a status de sincronização no cabeçalho: `synced` (Conectado), `syncing` (Sincronizando), `error` (Erro com opção de retry) e `local_demo` (Modo Local).
+   - Importação explícita com filtro de itens virtuais e verificação de duplicidade por ID.
+
+4. **Componente de Importação (`components/ImportModal.tsx`):**
+   - Modal com resumo categorizado dos registros locais encontrados.
+   - Opções claras: "Importar para a Conta" ou "Ignorar".
+   - Garantia de que senhas locais nunca são transmitidas.
+
+5. **Interface de Login Atualizada (`components/LoginScreen.tsx`):**
+   - Integração completa com login, cadastro e recuperação de senha por e-mail.
+   - Alternância fluida para o Modo Local de Demonstração.
+
+---
+
+### 3. Progresso dos Arquivos Alterados e Criados
 
 | Arquivo | Motivo da Alteração | Status |
 |---|---|---|
-| `package.json` | Adição de scripts (`typecheck`, `test`, `build`), tipos e dependências locais (`tailwindcss`, `vitest`) com caminhos seguros | Concluído |
-| `vite.config.ts` | Remoção de injeção de GEMINI_API_KEY e configurações desnecessárias | Concluído |
-| `index.html` | Remoção de Tailwind CDN, importmap redundante, correção de viewport e link do CSS | Concluído |
-| `index.css` | Criação com diretivas locais do Tailwind CSS e estilos do tema | Concluído |
-| `tailwind.config.js` | Configuração local compatível com o design system existente | Concluído |
-| `postcss.config.js` | Configuração de PostCSS para Tailwind | Concluído |
-| `types.ts` | Correção da tipagem de `activeType`, definição de `amountCents`, esquemas de recorrência e série | Concluído |
-| `utils/moneyUtils.ts` | Centralização de conversão, formatação, validação e cálculo em centavos inteiros | Concluído |
-| `utils/dateUtils.ts` | Manipulação segura de datas sem deslocamento de fuso e centralização de formatação | Concluído |
-| `utils/recurrenceUtils.ts` | Geração de ocorrências por período, regra de fim de mês e controle de exceções | Concluído |
-| `utils/storageManager.ts` | Gerenciamento resiliente de LocalStorage, backup V1, migração V2 e recuperação de corrupção | Concluído |
-| `components/EventModal.tsx` | Correção de tipagem, validação robusta, aviso de lembretes e prevenção de submissão duplicada | Concluído |
-| `components/BalanceSummary.tsx` | Separação entre Realizado e Previsto, exibição de Contas a Pagar e a Receber | Concluído |
-| `components/LoginScreen.tsx` | Sinalização de Modo Local Demonstração e desativação de cadastro de senhas em texto puro | Concluído |
-| `components/CalendarGrid.tsx` | Ajustes de acessibilidade, renderização de séries dinâmicas e suporte a centavos | Concluído |
-| `components/SideMenu.tsx` | Ajuste para valores em centavos e filtros coerentes com o mês | Concluído |
-| `App.tsx` | Integração do storage resiliente, gerenciamento de séries, cálculo de balanço e recuperação | Concluído |
+| `package.json` | Adição da dependência `@supabase/supabase-js` | Concluído |
+| `vite-env.d.ts` | Tipagem estrita de `import.meta.env` para Vite e Supabase | Concluído |
+| `tsconfig.json` | Inclusão de `vite/client` na lista de tipos do TypeScript | Concluído |
+| `supabase/schema.sql` | Script DDL completo de PostgreSQL, RLS, triggers e índices | Concluído |
+| `.env.example` | Documentação de variáveis de ambiente do Supabase | Concluído |
+| `services/supabaseClient.ts` | Inicialização segura do cliente Supabase e detecção de configuração | Concluído |
+| `services/authService.ts` | Autenticação com e-mail, confirmação, reset de senha e logout | Concluído |
+| `services/syncService.ts` | Sincronização em nuvem, tratamento de erros e importação deduplicada | Concluído |
+| `components/ImportModal.tsx` | Assistente de importação explícita de dados locais para a nuvem | Concluído |
+| `components/LoginScreen.tsx` | Abas de login/cadastro com e-mail, recuperação e acesso local | Concluído |
+| `App.tsx` | Indicador de sincronização em nuvem, gestão de sessão e importação | Concluído |
+| `tests/supabaseClient.test.ts` | Testes de detecção de credenciais ausentes e placeholders | Concluído |
+| `tests/authService.test.ts` | Testes de validação de e-mail e tamanho de senha | Concluído |
+| `tests/syncService.test.ts` | Testes de deduplicação e filtro de ocorrências virtuais na importação | Concluído |
 
 ---
 
@@ -126,61 +164,33 @@ Este documento registra o diagnóstico, decisões técnicas, implementação, va
 
 #### A. Verificação TypeScript (`npm run typecheck`)
 - **Comando:** `node ./node_modules/typescript/bin/tsc --noEmit`
-- **Resultado:** **0 erros**. Todos os tipos estritos validados com sucesso.
+- **Resultado:** **0 erros**. Compilação estrita limpa.
 
 #### B. Testes Automatizados Unitários (`npm run test`)
 - **Ferramenta:** Vitest v3.2.7
-- **Resultado:** **19 testes em 5 arquivos com 100% de sucesso**.
-  - `tests/moneyUtils.test.ts` (6 testes):
-    - Conversão de "33", "33,50", "33.50", "1.234,56", "1234,56", "1234.56".
-    - Rejeição de valores negativos, zero, vazios e não finitos.
-    - Rejeição de formatos ambíguos ("1.234") com orientação explícita.
-    - Edição e salvamento cíclico sem multiplicação ou distorção de centavos.
-    - Formatação para padrão Real Brasileiro (BRL).
-    - Conversão segura de float legado para centavos inteiros.
-  - `tests/financialSummary.test.ts` (1 teste):
-    - Separação entre receitas recebidas, contas a receber, despesas pagas e contas a pagar.
-    - Cálculo exato de Resultado Realizado e Resultado Previsto em centavos.
-    - Isolamento de compromissos sem valor no balanço.
-  - `tests/recurrenceUtils.test.ts` (7 testes):
-    - Recorrência mensal no dia 31 em ano bissexto (2024: 29 fev, 31 mar, 30 abr, 31 mai).
-    - Recorrência mensal no dia 31 em ano comum (2026: 28 fev, 31 mar).
-    - Geração sob demanda para a janela consultada.
-    - Exclusão de ocorrência única isolada via exceção.
-    - Exclusão de "esta e futuras" preservando o histórico anterior.
-    - Edição pontual com overrides.
-    - Recalcular regra de "esta e futuras" sem deslocamentos por ms e sem duplicidade.
-    - Pagamento de uma ocorrência isolada sem afetar as demais da série.
-  - `tests/storageManager.test.ts` (2 testes):
-    - Preservação de dados corrompidos com geração de backup de emergência sem sobrescrever com lista vazia.
-    - Migração V1 para V2 executada exatamente uma vez com criação de backup pré-migração.
-  - `tests/dateUtils.test.ts` (3 testes):
-    - Normalização de datas sem distorção por UTC/fuso local.
-    - Normalização de formatos legados.
-    - Validação de horários no mesmo dia exigindo término posterior ao início.
+- **Resultado:** **25 testes em 8 arquivos com 100% de aprovação**.
+  - `tests/moneyUtils.test.ts`: 6 testes aprovados.
+  - `tests/authService.test.ts`: 4 testes aprovados (validação de formato de e-mail, senha mínima, credenciais vazias).
+  - `tests/supabaseClient.test.ts`: 1 teste aprovado (detecção precisa de ambiente e ausência de simulação falsa).
+  - `tests/syncService.test.ts`: 1 teste aprovado (filtro de ocorrências virtuais e prevenção de duplicações na importação).
+  - `tests/financialSummary.test.ts`: 1 teste aprovado (separação entre realizado e previsto).
+  - `tests/recurrenceUtils.test.ts`: 7 testes aprovados (recorrência no dia 31, bissextos, exceções, etc.).
+  - `tests/storageManager.test.ts`: 2 testes aprovados (proteção de corrupção e migração versionada única).
+  - `tests/dateUtils.test.ts`: 3 testes aprovados (estabilidade de timezone e horários de compromisso).
 
 #### C. Build de Produção (`npm run build`)
 - **Comando:** `tsc --noEmit && vite build`
-- **Resultado:** Build concluído com sucesso.
+- **Resultado:** Build concluído com sucesso em 11.44s.
 - **Artefatos:**
   - `dist/index.html` (0.62 kB)
-  - `dist/assets/index-BtpOTMWa.css` (34.49 kB)
-  - `dist/assets/index-Cbe3UD87.js` (335.09 kB)
-
-#### D. Testes em Navegador
-- **Servidor Local Testado:** `http://127.0.0.1:3000/` via Vite Preview (`node ./node_modules/vite/bin/vite.js preview --port 3000`).
-- **Limitação Observada:** O subagente de navegador interno relatou falha de download do driver Playwright (`404 Not Found` nos endpoints do Azure CDN da infraestrutura do subagente). O servidor web local e a aplicação funcionam perfeitamente na porta 3000.
+  - `dist/assets/index-U9FqMdm-.css` (35.83 kB)
+  - `dist/assets/index-Dd9liIDT.js` (586.96 kB)
 
 ---
 
 ### 5. Limitações e Pendências para Etapas Futuras
 
-- **Etapa 2 (Próximo Passo):**
-  - Autenticação real com Supabase (ou serviço compatível) com e-mail e senha.
-  - Verificação de e-mail no fluxo de cadastro.
-  - Criação da tabela de perfil e itens no PostgreSQL com isolamento rigoroso por `user_id` e Row Level Security (RLS).
-  - Fluxo de importação explícita dos registros locais preservados na Etapa 1 para a conta autenticada, sem duplicidades e sem importar senhas.
-  - Sincronização em tempo real entre múltiplos dispositivos.
+- **Configuração Externa do Usuário:** Para conectar a uma instância real em produção, o usuário deve criar um projeto no Supabase, colar as credenciais em `.env.local` e executar o script `supabase/schema.sql` no SQL Editor do Supabase. A aplicação já está 100% preparada para essa conexão.
 - **Etapa 3:** Lembretes em segundo plano via servidor agendador, fuso horário configurável na conta (`America/Sao_Paulo`) e notificações push reais.
 - **Etapa 4:** Assistente pessoal com IA interpretando comandos de linguagem natural e validando ações no backend.
 - **Etapa 5:** Integração oficial com WhatsApp (áudio e texto).

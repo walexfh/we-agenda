@@ -29,6 +29,23 @@ import {
   saveUserProfile, 
   generateUUID 
 } from './utils/storageManager';
+import { 
+  isSupabaseConfigured, 
+  supabase 
+} from './services/supabaseClient';
+import { 
+  signOut as authSignOut, 
+  getActiveSession 
+} from './services/authService';
+import { 
+  fetchCloudData, 
+  syncUpsertItem, 
+  syncDeleteItem, 
+  syncUpsertSeries, 
+  syncDeleteSeries, 
+  importLocalRecordsToCloud, 
+  SyncStatus 
+} from './services/syncService';
 import { CalendarGrid } from './components/CalendarGrid';
 import { FilterMenu } from './components/FilterMenu';
 import { SideMenu } from './components/SideMenu';
@@ -36,6 +53,7 @@ import { EventModal } from './components/EventModal';
 import { DeleteModal } from './components/DeleteModal';
 import { BalanceSummary } from './components/BalanceSummary';
 import { LoginScreen } from './components/LoginScreen';
+import { ImportModal } from './components/ImportModal';
 import { 
   Calendar, 
   Filter, 
@@ -50,7 +68,10 @@ import {
   Edit2, 
   AlertTriangle, 
   Copy, 
-  Check 
+  Check, 
+  CloudCheck, 
+  CloudOff, 
+  RefreshCw 
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -59,6 +80,27 @@ export default function App() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(() => {
     return localStorage.getItem('fincal_current_user');
   });
+
+  const [authType, setAuthType] = useState<'cloud' | 'local'>(() => {
+    return (localStorage.getItem('fincal_auth_type') as 'cloud' | 'local') || 'local';
+  });
+
+  const [userEmail, setUserEmail] = useState<string>(() => {
+    return localStorage.getItem('fincal_user_email') || '';
+  });
+
+  // --- Sincronização & Nuvem ---
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>(() => {
+    const isCloud = localStorage.getItem('fincal_auth_type') === 'cloud';
+    return isCloud && isSupabaseConfigured() ? 'synced' : 'local_demo';
+  });
+
+  // --- Importação Explícita de Dados Locais ---
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [unimportedLocalData, setUnimportedLocalData] = useState<{
+    items: CalendarItem[];
+    series: RecurrenceSeries[];
+  } | null>(null);
 
   // --- Data State ---
   const [items, setItems] = useState<CalendarItem[]>([]);
@@ -99,7 +141,91 @@ export default function App() {
     showUnpaidOnly: false,
   });
 
-  // Carrega os dados com resiliência ao montar ou ao trocar de usuário
+  // Verifica se há registros locais prévios elegíveis para importação
+  const checkLocalDataForImport = useCallback((cloudUserId: string) => {
+    const importDismissed = localStorage.getItem(`fincal_import_dismissed_${cloudUserId}`);
+    if (importDismissed === 'true') return;
+
+    // Procura por dados salvos em contas locais antigas (ex: 'demo' ou usuários locais)
+    const localUsers = JSON.parse(localStorage.getItem('fincal_users') || '[]');
+    const candidateKeys = ['demo', ...localUsers.map((u: any) => u.username)];
+    
+    let candidateItems: CalendarItem[] = [];
+    let candidateSeries: RecurrenceSeries[] = [];
+
+    for (const key of candidateKeys) {
+      if (key && key !== cloudUserId) {
+        const loaded = loadUserData(key);
+        if (loaded.status === 'success' && (loaded.items.length > 0 || loaded.series.length > 0)) {
+          candidateItems.push(...loaded.items);
+          candidateSeries.push(...loaded.series);
+        }
+      }
+    }
+
+    if (candidateItems.length > 0 || candidateSeries.length > 0) {
+      setUnimportedLocalData({ items: candidateItems, series: candidateSeries });
+      setIsImportModalOpen(true);
+    }
+  }, []);
+
+  // Monitora sessão Supabase e recarrega dados da nuvem quando autenticado
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !supabase) return;
+
+    // Carrega sessão inicial
+    getActiveSession().then(session => {
+      if (session?.user) {
+        setCurrentUserId(session.user.id);
+        setAuthType('cloud');
+        setUserEmail(session.user.email || '');
+        localStorage.setItem('fincal_current_user', session.user.id);
+        localStorage.setItem('fincal_auth_type', 'cloud');
+        localStorage.setItem('fincal_user_email', session.user.email || '');
+      }
+    });
+
+    // Ouve alterações no estado da autenticação
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        setCurrentUserId(session.user.id);
+        setAuthType('cloud');
+        setUserEmail(session.user.email || '');
+        localStorage.setItem('fincal_current_user', session.user.id);
+        localStorage.setItem('fincal_auth_type', 'cloud');
+        localStorage.setItem('fincal_user_email', session.user.email || '');
+
+        setSyncStatus('syncing');
+        const cloudData = await fetchCloudData(session.user.id);
+        if (cloudData.success) {
+          setItems(cloudData.items || []);
+          setSeries(cloudData.series || []);
+          setUserProfile(cloudData.profile || { name: session.user.email?.split('@')[0] || '' });
+          setSyncStatus('synced');
+          checkLocalDataForImport(session.user.id);
+        } else {
+          setSyncStatus('error');
+        }
+      } else if (event === 'SIGNED_OUT') {
+        setCurrentUserId(null);
+        setAuthType('local');
+        setUserEmail('');
+        localStorage.removeItem('fincal_current_user');
+        localStorage.removeItem('fincal_auth_type');
+        localStorage.removeItem('fincal_user_email');
+        setItems([]);
+        setSeries([]);
+        setUserProfile({ name: '' });
+        setSyncStatus('local_demo');
+      }
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, [checkLocalDataForImport]);
+
+  // Carrega os dados (Nuvem ou Local) ao alterar currentUserId
   useEffect(() => {
     if (!currentUserId) {
       setItems([]);
@@ -109,22 +235,45 @@ export default function App() {
       return;
     }
 
-    const result = loadUserData(currentUserId);
-    if (result.status === 'success') {
-      setItems(result.items);
-      setSeries(result.series);
-      setUserProfile(result.profile);
-      setCorruptedState(null);
-    } else if (result.status === 'corrupted') {
-      setCorruptedState({
-        rawContent: result.rawContent,
-        backupKey: result.backupKey,
+    if (authType === 'cloud' && isSupabaseConfigured()) {
+      setSyncStatus('syncing');
+      fetchCloudData(currentUserId).then(result => {
+        if (result.success) {
+          setItems(result.items || []);
+          setSeries(result.series || []);
+          if (result.profile) setUserProfile(result.profile);
+          setSyncStatus('synced');
+          checkLocalDataForImport(currentUserId);
+        } else {
+          setSyncStatus('error');
+          // Fallback para storage local em caso de instabilidade
+          const localFallback = loadUserData(currentUserId);
+          if (localFallback.status === 'success') {
+            setItems(localFallback.items);
+            setSeries(localFallback.series);
+          }
+        }
       });
-      setStorageError(result.error);
-    } else if (result.status === 'unavailable') {
-      setStorageError(result.error);
+    } else {
+      // Modo Local de Demonstração
+      const result = loadUserData(currentUserId);
+      if (result.status === 'success') {
+        setItems(result.items);
+        setSeries(result.series);
+        setUserProfile(result.profile);
+        setCorruptedState(null);
+        setSyncStatus('local_demo');
+      } else if (result.status === 'corrupted') {
+        setCorruptedState({
+          rawContent: result.rawContent,
+          backupKey: result.backupKey,
+        });
+        setStorageError(result.error);
+      } else if (result.status === 'unavailable') {
+        setStorageError(result.error);
+      }
     }
-  }, [currentUserId]);
+  }, [currentUserId, authType, checkLocalDataForImport]);
 
   useEffect(() => {
     if (isDarkMode) {
@@ -148,7 +297,6 @@ export default function App() {
   }, [isDayDetailsOpen]);
 
   // --- Ocorrências Dinâmicas de Séries Recorrentes ---
-  // Gera apenas as ocorrências necessárias para a janela de visualização do calendário corrente
   const allVisibleItems = useMemo(() => {
     const days = generateCalendarDays(currentDate);
     if (days.length === 0) return items;
@@ -156,17 +304,13 @@ export default function App() {
     const intervalStart = days[0];
     const intervalEnd = days[days.length - 1];
 
-    // Ocorrências geradas a partir das séries ativas
     const generatedOccurrences: CalendarItem[] = [];
     for (const s of series) {
       const occurrences = generateOccurrencesForInterval(s, intervalStart, intervalEnd);
       generatedOccurrences.push(...occurrences);
     }
 
-    // Mescla itens independentes (sem virtuais) com as ocorrências da janela
     const nonVirtualItems = items.filter(i => !i.isVirtualOccurrence);
-    
-    // Evita duplicatas se algum item foi gravado com o mesmo ID
     const seenIds = new Set<string>();
     const combined: CalendarItem[] = [];
 
@@ -180,8 +324,7 @@ export default function App() {
     return combined;
   }, [items, series, currentDate]);
 
-  // --- Resumo Financeiro da Etapa 1.D ---
-  // Separação rigorosa entre realizado e previsto, sem tratar como saldo bancário
+  // --- Resumo Financeiro ---
   const monthlySummary = useMemo<FinancialSummary>(() => {
     const monthStart = startOfMonth(currentDate);
     const monthEnd = endOfMonth(currentDate);
@@ -228,7 +371,7 @@ export default function App() {
     };
   }, [currentDate, allVisibleItems]);
 
-  // --- Itens Filtrados do Dia Selecionado ---
+  // --- Itens do Dia Selecionado ---
   const selectedDayItems = useMemo(() => {
     if (!selectedDate) return [];
     const selectedDateISO = formatDateToISO(selectedDate);
@@ -249,26 +392,58 @@ export default function App() {
     });
   }, [selectedDate, allVisibleItems, filters]);
 
-  // --- Handlers de Autenticação / Modo Local ---
-  const handleLogin = (username: string, name: string) => {
-    const userId = username;
-    setCurrentUserId(userId);
-    localStorage.setItem('fincal_current_user', userId);
+  // --- Handlers de Autenticação ---
+  const handleLoginLocal = (username: string, name: string) => {
+    setCurrentUserId(username);
+    setAuthType('local');
+    localStorage.setItem('fincal_current_user', username);
+    localStorage.setItem('fincal_auth_type', 'local');
+    setSyncStatus('local_demo');
 
-    const loaded = loadUserData(userId);
+    const loaded = loadUserData(username);
     if (loaded.status === 'success') {
       setItems(loaded.items);
       setSeries(loaded.series);
       const profile = loaded.profile.name ? loaded.profile : { name };
       setUserProfile(profile);
-      saveUserProfile(userId, profile);
+      saveUserProfile(username, profile);
       setCorruptedState(null);
     }
   };
 
-  const handleLogout = () => {
+  const handleLoginCloudSuccess = (userId: string, email: string, name: string) => {
+    setCurrentUserId(userId);
+    setAuthType('cloud');
+    setUserEmail(email);
+    setUserProfile({ name: name || email.split('@')[0] });
+    localStorage.setItem('fincal_current_user', userId);
+    localStorage.setItem('fincal_auth_type', 'cloud');
+    localStorage.setItem('fincal_user_email', email);
+    setSyncStatus('syncing');
+
+    fetchCloudData(userId).then(result => {
+      if (result.success) {
+        setItems(result.items || []);
+        setSeries(result.series || []);
+        if (result.profile?.name) setUserProfile(result.profile);
+        setSyncStatus('synced');
+        checkLocalDataForImport(userId);
+      } else {
+        setSyncStatus('error');
+      }
+    });
+  };
+
+  const handleLogout = async () => {
+    if (authType === 'cloud') {
+      await authSignOut();
+    }
     setCurrentUserId(null);
+    setAuthType('local');
+    setUserEmail('');
     localStorage.removeItem('fincal_current_user');
+    localStorage.removeItem('fincal_auth_type');
+    localStorage.removeItem('fincal_user_email');
     setItems([]);
     setSeries([]);
     setUserProfile({ name: '' });
@@ -278,7 +453,16 @@ export default function App() {
   const handleUpdateProfile = (newProfile: UserProfile) => {
     setUserProfile(newProfile);
     if (currentUserId) {
-      saveUserProfile(currentUserId, newProfile);
+      if (authType === 'local') {
+        saveUserProfile(currentUserId, newProfile);
+      } else if (isSupabaseConfigured() && supabase) {
+        supabase.from('profiles').upsert({
+          id: currentUserId,
+          name: newProfile.name,
+          avatar_url: newProfile.avatar || '',
+          updated_at: new Date().toISOString(),
+        });
+      }
     }
   };
 
@@ -305,15 +489,14 @@ export default function App() {
     setIsAddModalOpen(true);
   };
 
-  // Validação no receptor e gravação resiliente (Etapa 1.A e 1.E)
-  const handleSaveItem = useCallback((
+  // Salva itens com sincronização em nuvem e persistência local resiliente
+  const handleSaveItem = useCallback(async (
     baseItem: Omit<CalendarItem, 'id'>, 
     recurrence: RecurrenceType, 
     editScope: 'single' | 'sequence' = 'single'
-  ): boolean => {
+  ): Promise<boolean> => {
     if (!currentUserId) return false;
 
-    // Validação de segurança no backend/receptor
     const trimmedTitle = String(baseItem.title || '').trim();
     if (!trimmedTitle) {
       setStorageError('Título obrigatório.');
@@ -345,9 +528,10 @@ export default function App() {
 
     let nextItems = [...items];
     let nextSeries = [...series];
+    let touchedItem: CalendarItem | null = null;
+    let touchedSeries: RecurrenceSeries | null = null;
 
     if (editingItem) {
-      // 1. Edição de ocorrência pertencente a uma série recorrente nova
       if (editingItem.seriesId) {
         const targetSeriesIndex = nextSeries.findIndex(s => s.id === editingItem.seriesId);
         if (targetSeriesIndex >= 0) {
@@ -367,8 +551,8 @@ export default function App() {
               alertMinutes: baseItem.alertMinutes,
             });
             nextSeries[targetSeriesIndex] = updated;
+            touchedSeries = updated;
           } else {
-            // "Esta e as próximas" recalcula a regra sem deslocamento por ms
             const newSeriesId = generateUUID();
             const { updatedOldSeries, newSeries } = splitAndAdvanceSeries(
               targetSeries,
@@ -391,18 +575,22 @@ export default function App() {
             if (updatedOldSeries) {
               nextSeries[targetSeriesIndex] = updatedOldSeries;
               nextSeries.push(newSeries);
+              if (authType === 'cloud') {
+                syncUpsertSeries(currentUserId, updatedOldSeries);
+                syncUpsertSeries(currentUserId, newSeries);
+              }
             } else {
               nextSeries[targetSeriesIndex] = newSeries;
+              touchedSeries = newSeries;
             }
           }
         }
       } else if (editingItem.recurrenceId && editScope === 'sequence') {
-        // 2. Edição de série legada em lote (preserva compatibilidade)
         const timeDiff = baseItem.date.getTime() - editingItem.date.getTime();
         nextItems = nextItems.map(item => {
           if (item.recurrenceId === editingItem.recurrenceId && item.date.getTime() >= editingItem.date.getTime()) {
             const newDate = timeDiff !== 0 ? new Date(item.date.getTime() + timeDiff) : item.date;
-            return {
+            const updatedItem: CalendarItem = {
               ...item,
               ...baseItem,
               title: trimmedTitle,
@@ -412,35 +600,37 @@ export default function App() {
               recurrenceId: item.recurrenceId,
               isPaid: item.id === editingItem.id ? baseItem.isPaid : item.isPaid,
             };
+            if (authType === 'cloud') syncUpsertItem(currentUserId, updatedItem);
+            return updatedItem;
           }
           return item;
         });
       } else {
-        // 3. Edição de item individual isolado
         nextItems = nextItems.map(item => {
           if (item.id === editingItem.id) {
-            return {
+            const updatedItem: CalendarItem = {
               ...item,
               ...baseItem,
               title: trimmedTitle,
               id: editingItem.id,
             };
+            touchedItem = updatedItem;
+            return updatedItem;
           }
           return item;
         });
       }
     } else {
-      // Criação de NOVO item
+      // Criação de NOVO
       if (recurrence === 'once') {
-        // Item pontual único com UUID
         const newItem: CalendarItem = {
           ...baseItem,
           title: trimmedTitle,
           id: generateUUID(),
         };
         nextItems.push(newItem);
+        touchedItem = newItem;
       } else {
-        // Criação de Nova Série Recorrente
         const seriesId = generateUUID();
         const [, , startDay] = baseItem.dateStr.split('-').map(Number);
         const newRecurrenceSeries: RecurrenceSeries = {
@@ -465,21 +655,30 @@ export default function App() {
           exceptions: {},
         };
         nextSeries.push(newRecurrenceSeries);
+        touchedSeries = newRecurrenceSeries;
       }
     }
 
-    // Persistência com tratamento de erro e quota
-    const saveResult = saveUserData(currentUserId, nextItems, nextSeries);
-    if (!saveResult.success) {
-      setStorageError(saveResult.error || 'Falha ao salvar dados no armazenamento local.');
-      return false;
+    // Persistência local segura
+    saveUserData(currentUserId, nextItems, nextSeries);
+
+    // Sincronização em nuvem se estiver autenticado no Supabase
+    if (authType === 'cloud' && isSupabaseConfigured()) {
+      setSyncStatus('syncing');
+      try {
+        if (touchedItem) await syncUpsertItem(currentUserId, touchedItem);
+        if (touchedSeries) await syncUpsertSeries(currentUserId, touchedSeries);
+        setSyncStatus('synced');
+      } catch {
+        setSyncStatus('error');
+      }
     }
 
     setItems(nextItems);
     setSeries(nextSeries);
     setEditingItem(null);
     return true;
-  }, [currentUserId, items, series, editingItem]);
+  }, [currentUserId, authType, items, series, editingItem]);
 
   // --- Delete Handlers ---
   const handleDeleteRequest = (item: CalendarItem) => {
@@ -487,13 +686,12 @@ export default function App() {
     setDeleteModalOpen(true);
   };
 
-  const handleConfirmDelete = (scope: 'single' | 'sequence') => {
+  const handleConfirmDelete = async (scope: 'single' | 'sequence') => {
     if (!itemToDelete || !currentUserId) return;
 
     let nextItems = [...items];
     let nextSeries = [...series];
 
-    // Se for ocorrência de série nova
     if (itemToDelete.seriesId) {
       const seriesIndex = nextSeries.findIndex(s => s.id === itemToDelete.seriesId);
       if (seriesIndex >= 0) {
@@ -501,35 +699,36 @@ export default function App() {
         const dateStr = itemToDelete.originalDateStr || itemToDelete.dateStr;
 
         if (scope === 'single') {
-          nextSeries[seriesIndex] = deleteSingleOccurrence(targetSeries, dateStr);
+          const updated = deleteSingleOccurrence(targetSeries, dateStr);
+          nextSeries[seriesIndex] = updated;
+          if (authType === 'cloud') syncUpsertSeries(currentUserId, updated);
         } else {
           const updated = deleteFutureOccurrences(targetSeries, dateStr);
           if (updated) {
             nextSeries[seriesIndex] = updated;
+            if (authType === 'cloud') syncUpsertSeries(currentUserId, updated);
           } else {
             nextSeries = nextSeries.filter(s => s.id !== itemToDelete.seriesId);
+            if (authType === 'cloud') syncDeleteSeries(currentUserId, itemToDelete.seriesId);
           }
         }
       }
     } else if (scope === 'sequence' && itemToDelete.recurrenceId) {
-      // Série legada
       nextItems = nextItems.filter(item => {
-        if (item.recurrenceId === itemToDelete.recurrenceId) {
-          return item.date.getTime() < itemToDelete.date.getTime();
+        if (item.recurrenceId === itemToDelete.recurrenceId && item.date.getTime() >= itemToDelete.date.getTime()) {
+          if (authType === 'cloud') syncDeleteItem(currentUserId, item.id);
+          return false;
         }
         return true;
       });
     } else {
-      // Item único
       nextItems = nextItems.filter(i => i.id !== itemToDelete.id);
+      if (authType === 'cloud') syncDeleteItem(currentUserId, itemToDelete.id);
     }
 
-    const saveResult = saveUserData(currentUserId, nextItems, nextSeries);
-    if (saveResult.success) {
-      setItems(nextItems);
-      setSeries(nextSeries);
-    }
-
+    saveUserData(currentUserId, nextItems, nextSeries);
+    setItems(nextItems);
+    setSeries(nextSeries);
     setDeleteModalOpen(false);
     setItemToDelete(null);
 
@@ -539,7 +738,7 @@ export default function App() {
     }
   };
 
-  // Alterna status de pagamento (para séries, altera apenas a ocorrência pontual)
+  // Alterna status de pagamento
   const handleTogglePaid = (item: CalendarItem) => {
     if (!currentUserId) return;
 
@@ -551,21 +750,51 @@ export default function App() {
       if (seriesIndex >= 0) {
         const targetSeries = nextSeries[seriesIndex];
         const dateStr = item.originalDateStr || item.dateStr;
-        nextSeries[seriesIndex] = toggleSeriesOccurrencePaid(targetSeries, dateStr, Boolean(item.isPaid));
+        const updated = toggleSeriesOccurrencePaid(targetSeries, dateStr, Boolean(item.isPaid));
+        nextSeries[seriesIndex] = updated;
+        if (authType === 'cloud') syncUpsertSeries(currentUserId, updated);
       }
     } else {
       nextItems = nextItems.map(i => {
         if (i.id === item.id) {
-          return { ...i, isPaid: !i.isPaid };
+          const updated = { ...i, isPaid: !i.isPaid };
+          if (authType === 'cloud') syncUpsertItem(currentUserId, updated);
+          return updated;
         }
         return i;
       });
     }
 
-    const saveResult = saveUserData(currentUserId, nextItems, nextSeries);
-    if (saveResult.success) {
-      setItems(nextItems);
-      setSeries(nextSeries);
+    saveUserData(currentUserId, nextItems, nextSeries);
+    setItems(nextItems);
+    setSeries(nextSeries);
+  };
+
+  // Confirmação da importação de dados locais
+  const handleConfirmImport = async (): Promise<boolean> => {
+    if (!currentUserId || !unimportedLocalData) return false;
+
+    setSyncStatus('syncing');
+    const res = await importLocalRecordsToCloud(
+      currentUserId,
+      unimportedLocalData.items,
+      unimportedLocalData.series
+    );
+
+    if (res.success) {
+      localStorage.setItem(`fincal_import_dismissed_${currentUserId}`, 'true');
+      const cloudData = await fetchCloudData(currentUserId);
+      if (cloudData.success) {
+        setItems(cloudData.items || []);
+        setSeries(cloudData.series || []);
+        setSyncStatus('synced');
+      }
+      setIsImportModalOpen(false);
+      setUnimportedLocalData(null);
+      return true;
+    } else {
+      setSyncStatus('error');
+      return false;
     }
   };
 
@@ -588,13 +817,18 @@ export default function App() {
   };
 
   if (!currentUserId) {
-    return <LoginScreen onLogin={handleLogin} />;
+    return (
+      <LoginScreen 
+        onLoginLocal={handleLoginLocal} 
+        onLoginCloudSuccess={handleLoginCloudSuccess} 
+      />
+    );
   }
 
   return (
     <div className="h-screen w-full bg-gray-50 dark:bg-gray-900 flex flex-col relative overflow-hidden transition-colors duration-300">
       
-      {/* Alerta de Armazenamento Corrompido / Indisponível */}
+      {/* Alerta de Armazenamento Corrompido */}
       {corruptedState && (
         <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-gray-900 rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-red-200 dark:border-red-900/60">
@@ -639,14 +873,51 @@ export default function App() {
       )}
 
       {/* Top Bar */}
-      <header className="px-4 py-4 bg-white dark:bg-gray-800 shadow-sm z-10 flex justify-between items-center transition-colors">
-        <button 
-          onClick={() => setIsSideMenuOpen(true)}
-          aria-label="Abrir menu lateral"
-          className="p-2 text-gray-500 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
-        >
-          <Menu size={24} />
-        </button>
+      <header className="px-4 py-3 bg-white dark:bg-gray-800 shadow-sm z-10 flex justify-between items-center transition-colors">
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={() => setIsSideMenuOpen(true)}
+            aria-label="Abrir menu lateral"
+            className="p-2 text-gray-500 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
+          >
+            <Menu size={24} />
+          </button>
+
+          {/* Indicador de Status de Sincronização / Modo */}
+          <div 
+            title={
+              syncStatus === 'synced' ? 'Sincronizado com a nuvem' :
+              syncStatus === 'syncing' ? 'Sincronizando alterações...' :
+              syncStatus === 'error' ? 'Erro de sincronização. Clique para tentar novamente.' :
+              'Modo Local de Demonstração (registros salvos apenas neste navegador)'
+            }
+            onClick={() => {
+              if (syncStatus === 'error' && authType === 'cloud' && currentUserId) {
+                setSyncStatus('syncing');
+                fetchCloudData(currentUserId).then(r => setSyncStatus(r.success ? 'synced' : 'error'));
+              }
+            }}
+            className={clsx(
+              "hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors cursor-pointer",
+              syncStatus === 'synced' && "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/40",
+              syncStatus === 'syncing' && "bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400 border-blue-200 dark:border-blue-800/40",
+              syncStatus === 'error' && "bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400 border-red-200 dark:border-red-800/40",
+              syncStatus === 'local_demo' && "bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:text-amber-400 border-amber-200 dark:border-amber-800/40"
+            )}
+          >
+            {syncStatus === 'synced' && <CloudCheck size={14} className="text-emerald-500" />}
+            {syncStatus === 'syncing' && <RefreshCw size={13} className="text-blue-500 animate-spin" />}
+            {syncStatus === 'error' && <AlertTriangle size={13} className="text-red-500" />}
+            {syncStatus === 'local_demo' && <CloudOff size={13} className="text-amber-500" />}
+            
+            <span>
+              {syncStatus === 'synced' && 'Nuvem Conectada'}
+              {syncStatus === 'syncing' && 'Sincronizando...'}
+              {syncStatus === 'error' && 'Falha ao Sincronizar'}
+              {syncStatus === 'local_demo' && 'Modo Local'}
+            </span>
+          </div>
+        </div>
 
         <div className="flex items-center gap-2">
           <button 
@@ -656,7 +927,7 @@ export default function App() {
           >
             <ChevronLeft size={24} />
           </button>
-          <h1 className="text-lg font-bold text-gray-800 dark:text-white capitalize w-40 text-center">
+          <h1 className="text-base sm:text-lg font-bold text-gray-800 dark:text-white capitalize w-36 sm:w-40 text-center truncate">
             {formatMonthYear(currentDate)}
           </h1>
           <button 
@@ -673,7 +944,7 @@ export default function App() {
           aria-label="Filtros"
           className="p-2 text-gray-500 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors relative"
         >
-          <Filter size={24} />
+          <Filter size={22} />
           {(!filters.showAppointments || !filters.showFinances || filters.showPaidOnly || filters.showUnpaidOnly) && (
             <span className="absolute top-2 right-2 w-2 h-2 bg-blue-500 rounded-full border border-white dark:border-gray-800" />
           )}
@@ -705,7 +976,7 @@ export default function App() {
         </div>
       </main>
 
-      {/* Menus and Modals */}
+      {/* Menus e Modais */}
       <SideMenu 
         isOpen={isSideMenuOpen}
         onClose={() => setIsSideMenuOpen(false)}
@@ -854,7 +1125,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Modals */}
+      {/* Modais */}
       <EventModal
         isOpen={isAddModalOpen}
         onClose={() => {
@@ -877,7 +1148,23 @@ export default function App() {
         isRecurring={Boolean(itemToDelete?.seriesId || itemToDelete?.recurrenceId)}
       />
 
-      {/* Resumo do Mês Centralizado e Transparente */}
+      {/* Modal de Importação Explícita de Dados Locais */}
+      {unimportedLocalData && (
+        <ImportModal
+          isOpen={isImportModalOpen}
+          onClose={() => {
+            setIsImportModalOpen(false);
+            if (currentUserId) {
+              localStorage.setItem(`fincal_import_dismissed_${currentUserId}`, 'true');
+            }
+          }}
+          localItems={unimportedLocalData.items}
+          localSeries={unimportedLocalData.series}
+          onConfirmImport={handleConfirmImport}
+        />
+      )}
+
+      {/* Resumo do Mês */}
       <BalanceSummary 
         summary={monthlySummary}
         monthLabel={formatMonthYear(currentDate)}
