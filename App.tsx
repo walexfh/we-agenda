@@ -66,6 +66,7 @@ import { AssistantModal } from './components/AssistantModal';
 import { WhatsAppModal } from './components/WhatsAppModal';
 import { SearchModal } from './components/SearchModal';
 import { CategoryManagerModal } from './components/CategoryManagerModal';
+import { UpdateBanner } from './components/UpdateBanner';
 import { DEFAULT_TIMEZONE } from './utils/reminderUtils';
 import { 
   getNotificationPermission, 
@@ -1453,6 +1454,9 @@ export default function App() {
         monthlySummary={monthlySummary}
         onSaveItem={handleSaveItem}
       />
+
+      {/* Banner de Atualização Automática Contínua (Live Updates) */}
+      <UpdateBanner />
 
       {/* Resumo do Mês */}
       <BalanceSummary 

@@ -1,0 +1,126 @@
+name: CI/CD - Build, Test e Release Automático
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "ci-cd-build"
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: 🧪 Testes e Build Web
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Clonar Repositório
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Configurar Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 📦 Instalar Dependências
+        run: npm ci
+
+      - name: 🧪 Executar Testes Unitários
+        run: npm test
+
+      - name: 🏗️ Compilar Aplicação Web (Vite)
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://ufhfryxlsymojfmrtfjk.supabase.co' }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVmaGZyeXhsc3ltb2pmbXJ0ZmprIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTExMDg2NjUsImV4cCI6MjEwNjY4NDY2NX0.XjtRlHiaCrL3lZwa2ABRPpQ-XBTJ65wuQcoOXB2Y_yI' }}
+        run: npm run build
+
+      - name: 📤 Salvar Artefato Web
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: dist/
+          retention-days: 7
+
+  build-android-apk:
+    name: 📱 Compilação do APK Android
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Clonar Repositório
+        uses: actions/checkout@v4
+
+      - name: ⚙️ Configurar Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: ☕ Configurar Java 21 (JDK Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: 🤖 Configurar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 📦 Instalar Dependências Web
+        run: npm ci
+
+      - name: 📥 Baixar Artefato Web Compilado
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: dist
+
+      - name: 🔄 Sincronizar com Capacitor Android
+        run: npx cap sync android
+
+      - name: 🛠️ Dar Permissão de Execução ao Gradle Wrapper
+        run: chmod +x android/gradlew
+
+      - name: 🔨 Compilar APK Debug com Gradle
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: 📋 Copiar e Renomear APK
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk we-agenda.apk
+          ls -la we-agenda.apk
+
+      - name: 📤 Salvar Artefato APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: we-agenda-apk
+          path: we-agenda.apk
+          retention-days: 14
+
+      - name: 🚀 Criar ou Atualizar Release no GitHub
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/master'
+        with:
+          tag_name: latest
+          name: "W&E.Agenda — Versão Mais Recente (Automática)"
+          body: |
+            ## 🚀 Atualização Automática Contínua
+            Esta versão foi gerada e compilada automaticamente pelo GitHub Actions a partir do commit: `${{ github.sha }}`.
+
+            ### 📦 Download do APK Android:
+            - **[Baixar we-agenda.apk](https://github.com/${{ github.repository }}/releases/download/latest/we-agenda.apk)**
+
+            ### 📋 Detalhes da Compilação:
+            - **Commit**: `${{ github.sha }}`
+            - **Autor**: `${{ github.actor }}`
+            - **Mensagem**: `${{ github.event.head_commit.message }}`
+          files: we-agenda.apk
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
