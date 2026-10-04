@@ -1,7 +1,8 @@
 import React from 'react';
 import { format, isSameMonth, isSameDay, isToday } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 import { CalendarItem, FilterState } from '../types';
-import { generateCalendarDays } from '../utils/dateUtils';
+import { generateCalendarDays, formatDateToISO } from '../utils/dateUtils';
 import clsx from 'clsx';
 
 interface CalendarGridProps {
@@ -30,7 +31,8 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({ currentDate, items, 
       <div className="grid grid-cols-7 grid-rows-6 flex-1 bg-gray-100 dark:bg-gray-800 gap-[1px] border-b border-gray-200 dark:border-gray-800 min-h-0">
         {days.map((day) => {
           const isCurrentMonth = isSameMonth(day, currentDate);
-          const dayItems = items.filter(item => isSameDay(item.date, day));
+          const dayISO = formatDateToISO(day);
+          const dayItems = items.filter(item => (item.dateStr ? item.dateStr === dayISO : isSameDay(item.date, day)));
           
           // Apply filters
           const visibleItems = dayItems.filter(item => {

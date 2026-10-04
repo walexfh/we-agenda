@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { FilterState } from '../types';
 import { X, Check, Calendar, DollarSign, ArrowUpCircle, ArrowDownCircle } from 'lucide-react';
 
@@ -10,6 +10,16 @@ interface FilterMenuProps {
 }
 
 export const FilterMenu: React.FC<FilterMenuProps> = ({ isOpen, onClose, filters, setFilters }) => {
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const toggleFilter = (key: keyof FilterState) => {

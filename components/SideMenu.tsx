@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { CalendarItem, UserProfile } from '../types';
 import { X, CheckSquare, Square, DollarSign, Wallet, Moon, Sun, User, Edit2, Check, LogOut } from 'lucide-react';
-import { formatCurrency, formatMonthYear } from '../utils/dateUtils';
+import { formatCurrency } from '../utils/moneyUtils';
+import { formatMonthYear } from '../utils/dateUtils';
 import { format, isSameMonth } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import clsx from 'clsx';
@@ -38,7 +39,18 @@ export const SideMenu: React.FC<SideMenuProps> = ({
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState(userProfile.name);
 
-  // Update tempName when userProfile changes (e.g. on login/mount)
+  // Fecha no Escape
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  // Update tempName when userProfile changes
   React.useEffect(() => {
     setTempName(userProfile.name);
   }, [userProfile.name]);
@@ -53,8 +65,8 @@ export const SideMenu: React.FC<SideMenuProps> = ({
       .sort((a, b) => a.date.getTime() - b.date.getTime());
   }, [items, currentDate]);
 
-  const totalUnpaid = expenses.filter(e => !e.isPaid).reduce((acc, curr) => acc + (curr.amount || 0), 0);
-  const totalPaid = expenses.filter(e => e.isPaid).reduce((acc, curr) => acc + (curr.amount || 0), 0);
+  const totalUnpaidCents = expenses.filter(e => !e.isPaid).reduce((acc, curr) => acc + (curr.amountCents || 0), 0);
+  const totalPaidCents = expenses.filter(e => e.isPaid).reduce((acc, curr) => acc + (curr.amountCents || 0), 0);
 
   const saveProfile = () => {
     setUserProfile({ ...userProfile, name: tempName });
@@ -115,13 +127,13 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                     <div>
                         <span className="text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wide">Pendente</span>
                         <div className="text-2xl font-bold text-red-500">
-                            {showValues ? formatCurrency(totalUnpaid) : 'R$ ••••'}
+                            {showValues ? formatCurrency(totalUnpaidCents) : 'R$ ••••'}
                         </div>
                     </div>
                     <div className="text-right">
                         <span className="text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wide">Pago</span>
                         <div className="text-lg font-semibold text-emerald-500">
-                            {showValues ? formatCurrency(totalPaid) : 'R$ ••••'}
+                            {showValues ? formatCurrency(totalPaidCents) : 'R$ ••••'}
                         </div>
                     </div>
                 </div>
@@ -185,7 +197,7 @@ export const SideMenu: React.FC<SideMenuProps> = ({
                        
                        <div className="flex items-center gap-2">
                            <div className={clsx("font-semibold", item.isPaid ? "text-gray-400" : "text-red-500 dark:text-red-400")}>
-                               {showValues ? formatCurrency(item.amount || 0) : 'R$ •••'}
+                               {showValues ? formatCurrency(item.amountCents || 0) : 'R$ •••'}
                            </div>
                            <Edit2 size={14} className="text-gray-300 dark:text-gray-600 opacity-50" />
                        </div>
