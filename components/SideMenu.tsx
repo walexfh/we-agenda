@@ -1,0 +1,218 @@
+import React, { useMemo, useState } from 'react';
+import { CalendarItem, UserProfile } from '../types';
+import { X, CheckSquare, Square, DollarSign, Wallet, Moon, Sun, User, Edit2, Check, LogOut } from 'lucide-react';
+import { formatCurrency, formatMonthYear } from '../utils/dateUtils';
+import { format, isSameMonth } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import clsx from 'clsx';
+
+interface SideMenuProps {
+  isOpen: boolean;
+  onClose: () => void;
+  items: CalendarItem[];
+  currentDate: Date;
+  onTogglePaid: (id: string) => void;
+  onEditItem: (item: CalendarItem) => void;
+  showValues: boolean;
+  isDarkMode: boolean;
+  toggleDarkMode: () => void;
+  userProfile: UserProfile;
+  setUserProfile: (p: UserProfile) => void;
+  onLogout: () => void;
+}
+
+export const SideMenu: React.FC<SideMenuProps> = ({ 
+  isOpen, 
+  onClose, 
+  items,
+  currentDate, 
+  onTogglePaid,
+  onEditItem,
+  showValues,
+  isDarkMode,
+  toggleDarkMode,
+  userProfile,
+  setUserProfile,
+  onLogout
+}) => {
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [tempName, setTempName] = useState(userProfile.name);
+
+  // Update tempName when userProfile changes (e.g. on login/mount)
+  React.useEffect(() => {
+    setTempName(userProfile.name);
+  }, [userProfile.name]);
+
+  // Filter expenses strictly for the current month view
+  const expenses = useMemo(() => {
+    return items
+      .filter(item => 
+        item.type === 'expense' && 
+        isSameMonth(item.date, currentDate)
+      )
+      .sort((a, b) => a.date.getTime() - b.date.getTime());
+  }, [items, currentDate]);
+
+  const totalUnpaid = expenses.filter(e => !e.isPaid).reduce((acc, curr) => acc + (curr.amount || 0), 0);
+  const totalPaid = expenses.filter(e => e.isPaid).reduce((acc, curr) => acc + (curr.amount || 0), 0);
+
+  const saveProfile = () => {
+    setUserProfile({ ...userProfile, name: tempName });
+    setIsEditingName(false);
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      
+      <div className="relative w-4/5 max-w-sm bg-white dark:bg-gray-900 h-full shadow-2xl flex flex-col animate-in slide-in-from-left duration-200 border-r dark:border-gray-800">
+        
+        {/* Header Profile Section */}
+        <div className="p-6 pb-4 border-b dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
+          <div className="flex justify-between items-start mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center text-blue-600 dark:text-blue-300">
+                    <User size={24} />
+                </div>
+                <div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">Bem-vindo(a),</div>
+                    {isEditingName ? (
+                        <div className="flex items-center gap-2">
+                             <input 
+                                autoFocus
+                                type="text" 
+                                value={tempName}
+                                onChange={(e) => setTempName(e.target.value)}
+                                className="w-24 p-1 text-sm bg-white dark:bg-gray-700 border border-blue-300 rounded outline-none"
+                                onKeyDown={(e) => e.key === 'Enter' && saveProfile()}
+                             />
+                             <button onClick={saveProfile} className="text-emerald-500"><Check size={16} /></button>
+                        </div>
+                    ) : (
+                        <div className="flex items-center gap-2 group cursor-pointer" onClick={() => { setIsEditingName(true); setTempName(userProfile.name); }}>
+                            <h2 className="text-lg font-bold text-gray-800 dark:text-white truncate max-w-[120px]">{userProfile.name}</h2>
+                            <Edit2 size={12} className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </div>
+                    )}
+                </div>
+              </div>
+              <button onClick={onClose} className="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full text-gray-500 dark:text-gray-400">
+                <X size={20} />
+              </button>
+          </div>
+        </div>
+
+        {/* Summary Card */}
+        <div className="p-6 pb-2">
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-1">
+              Resumo de {format(currentDate, 'MMMM', { locale: ptBR })}
+            </h3>
+            {/* Changed background from gray-900 to white in light mode, and black/dark in dark mode */}
+            <div className="bg-white dark:bg-black rounded-2xl p-4 shadow-lg border border-gray-200 dark:border-gray-800">
+                <div className="flex justify-between items-end mb-4">
+                    <div>
+                        <span className="text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wide">Pendente</span>
+                        <div className="text-2xl font-bold text-red-500">
+                            {showValues ? formatCurrency(totalUnpaid) : 'R$ ••••'}
+                        </div>
+                    </div>
+                    <div className="text-right">
+                        <span className="text-gray-500 dark:text-gray-400 text-xs uppercase tracking-wide">Pago</span>
+                        <div className="text-lg font-semibold text-emerald-500">
+                            {showValues ? formatCurrency(totalPaid) : 'R$ ••••'}
+                        </div>
+                    </div>
+                </div>
+                <div className="w-full bg-gray-100 dark:bg-gray-800 h-1.5 rounded-full overflow-hidden">
+                    <div 
+                        className="bg-emerald-500 h-full transition-all duration-500" 
+                        style={{ width: `${expenses.length > 0 ? (expenses.filter(e => e.isPaid).length / expenses.length) * 100 : 0}%` }}
+                    />
+                </div>
+                <div className="text-center mt-2 text-xs text-gray-500 dark:text-gray-400">
+                    {expenses.filter(e => e.isPaid).length} de {expenses.length} despesas pagas
+                </div>
+            </div>
+        </div>
+
+        {/* Expenses List */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+           <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider px-2 mb-2">
+             Despesas de {format(currentDate, 'MMMM', { locale: ptBR })}
+           </h3>
+           
+           {expenses.length === 0 ? (
+               <div className="text-center text-gray-400 dark:text-gray-600 mt-10">
+                   <DollarSign size={40} className="mx-auto mb-2 opacity-20" />
+                   <p>Nenhuma despesa neste mês.</p>
+               </div>
+           ) : (
+               expenses.map(item => (
+                   <div 
+                     key={item.id} 
+                     onClick={() => {
+                        onClose(); // Close menu to focus on editing
+                        onEditItem(item);
+                     }}
+                     className={clsx(
+                         "flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer select-none",
+                         item.isPaid 
+                            ? "bg-gray-50 dark:bg-gray-800/40 border-gray-100 dark:border-gray-800 opacity-60" 
+                            : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-700 shadow-sm"
+                     )}
+                   >
+                       <div className="flex items-center gap-3">
+                            <button 
+                                onClick={(e) => { 
+                                    e.stopPropagation(); // Stop click from triggering edit
+                                    onTogglePaid(item.id); 
+                                }}
+                                className={clsx("transition-colors p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700", item.isPaid ? "text-emerald-500" : "text-gray-300 hover:text-gray-400")}
+                            >
+                                {item.isPaid ? <CheckSquare size={24} /> : <Square size={24} />}
+                            </button>
+                            <div>
+                                <h4 className={clsx("font-medium text-gray-800 dark:text-gray-200 leading-tight", item.isPaid && "line-through text-gray-500")}>
+                                    {item.title}
+                                </h4>
+                                <span className="text-xs text-gray-400">
+                                    {format(item.date, "dd", { locale: ptBR })} - {format(item.date, "EEE", { locale: ptBR })}
+                                </span>
+                            </div>
+                       </div>
+                       
+                       <div className="flex items-center gap-2">
+                           <div className={clsx("font-semibold", item.isPaid ? "text-gray-400" : "text-red-500 dark:text-red-400")}>
+                               {showValues ? formatCurrency(item.amount || 0) : 'R$ •••'}
+                           </div>
+                           <Edit2 size={14} className="text-gray-300 dark:text-gray-600 opacity-50" />
+                       </div>
+                   </div>
+               ))
+           )}
+        </div>
+
+        {/* Footer Toggle */}
+        <div className="p-4 border-t dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 flex flex-col gap-2">
+            <button 
+                onClick={toggleDarkMode}
+                className="w-full flex items-center justify-center gap-3 py-3 rounded-xl bg-white dark:bg-gray-800 border dark:border-gray-700 shadow-sm text-gray-700 dark:text-gray-200 font-medium hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            >
+                {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
+                {isDarkMode ? 'Modo Claro' : 'Modo Escuro'}
+            </button>
+            <button 
+                onClick={onLogout}
+                className="w-full flex items-center justify-center gap-3 py-3 rounded-xl border border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-400 font-medium hover:bg-red-50 dark:hover:bg-red-900/10 transition-colors"
+            >
+                <LogOut size={20} />
+                Sair
+            </button>
+        </div>
+
+      </div>
+    </div>
+  );
+};
