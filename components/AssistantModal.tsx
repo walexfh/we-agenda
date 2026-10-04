@@ -94,8 +94,12 @@ export const AssistantModal: React.FC<AssistantModalProps> = ({
           handleSendMessage(transcript);
         };
 
-        recognition.onerror = () => {
+        recognition.onerror = (event: any) => {
+          console.warn('Speech recognition error:', event?.error);
           setIsListening(false);
+          if (event?.error === 'not-allowed') {
+            alert('Acesso ao microfone negado. Por favor, autorize a permissão de gravação de áudio nas configurações do seu celular ou navegador.');
+          }
         };
 
         recognition.onend = () => {
@@ -107,22 +111,58 @@ export const AssistantModal: React.FC<AssistantModalProps> = ({
     }
   }, []);
 
-  const handleToggleListening = () => {
-    if (!speechRecognitionRef.current) {
-      alert('Reconhecimento de voz não suportado neste navegador. Use a digitação por texto.');
+  const handleToggleListening = async () => {
+    if (isListening) {
+      if (speechRecognitionRef.current) {
+        try { speechRecognitionRef.current.stop(); } catch {}
+      }
+      setIsListening(false);
       return;
     }
 
-    if (isListening) {
-      speechRecognitionRef.current.stop();
-      setIsListening(false);
-    } else {
-      try {
-        speechRecognitionRef.current.start();
-        setIsListening(true);
-      } catch {
-        setIsListening(false);
+    // 1. Solicita permissão explícita ao sistema operacional (Android / Navegador)
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const testStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Para a faixa de áudio de teste para liberar o canal
+        testStream.getTracks().forEach(track => track.stop());
       }
+    } catch (permErr: any) {
+      console.warn('Permissão de microfone negada:', permErr);
+      alert('Acesso ao microfone negado. Por favor, autorize o microfone para conversar com o assistente.');
+      return;
+    }
+
+    // 2. Inicia o reconhecimento de voz nativo
+    if (!speechRecognitionRef.current) {
+      // Tenta reinicializar se a classe estiver disponível
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'pt-BR';
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        recognition.onresult = (event: any) => {
+          const transcript = event.results[0][0].transcript;
+          setInputText(transcript);
+          setIsListening(false);
+          handleSendMessage(transcript);
+        };
+        recognition.onerror = () => setIsListening(false);
+        recognition.onend = () => setIsListening(false);
+        speechRecognitionRef.current = recognition;
+      } else {
+        alert('O reconhecimento de voz nativo não está disponível neste navegador. Você pode digitar sua mensagem no campo de texto.');
+        return;
+      }
+    }
+
+    try {
+      speechRecognitionRef.current.start();
+      setIsListening(true);
+    } catch (err: any) {
+      console.warn('Falha ao iniciar SpeechRecognition:', err);
+      setIsListening(false);
     }
   };
 
