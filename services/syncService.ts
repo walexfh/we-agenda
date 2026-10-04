@@ -25,13 +25,14 @@ export async function fetchCloudData(userId: string): Promise<CloudDataResult> {
     // 1. Carregar perfil
     const { data: profileData } = await supabase
       .from('profiles')
-      .select('name, avatar_url')
+      .select('name, avatar_url, timezone')
       .eq('id', userId)
       .maybeSingle();
 
     const profile: UserProfile = {
       name: profileData?.name || '',
       avatar: profileData?.avatar_url || '',
+      timezone: profileData?.timezone || 'America/Sao_Paulo',
     };
 
     // 2. Carregar itens da agenda

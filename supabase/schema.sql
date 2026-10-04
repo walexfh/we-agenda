@@ -9,6 +9,7 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   name text not null default '',
   avatar_url text,
+  timezone text not null default 'America/Sao_Paulo',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -47,12 +48,33 @@ create table if not exists public.recurrence_series (
   updated_at timestamptz not null default now()
 );
 
+-- 4. TABELA DE FILA DE LEMBRETES E NOTIFICAÇÕES (ETAPA 3)
+create table if not exists public.reminders (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  item_id text not null,
+  channel text not null check (channel in ('browser_notification', 'web_push', 'whatsapp')),
+  scheduled_at timestamptz not null,
+  status text not null check (status in ('scheduled', 'sent', 'delivered', 'failed', 'dismissed')) default 'scheduled',
+  title text not null,
+  body text default '',
+  advance_minutes integer default 0,
+  timezone text not null default 'America/Sao_Paulo',
+  sent_at timestamptz,
+  error_message text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint uq_reminders_user_item unique (user_id, item_id)
+);
+
 -- ==============================================================================
 -- ÍNDICES PARA ALTA PERFORMANCE
 -- ==============================================================================
 create index if not exists idx_calendar_items_user_date on public.calendar_items(user_id, date_str);
 create index if not exists idx_calendar_items_series on public.calendar_items(series_id);
 create index if not exists idx_recurrence_series_user on public.recurrence_series(user_id);
+create index if not exists idx_reminders_user_scheduled on public.reminders(user_id, scheduled_at, status);
+create index if not exists idx_reminders_status_scheduled on public.reminders(status, scheduled_at);
 
 -- ==============================================================================
 -- ROW LEVEL SECURITY (RLS) — ISOLAMENTO RIGOROSO ENTRE USUÁRIOS
@@ -62,6 +84,7 @@ create index if not exists idx_recurrence_series_user on public.recurrence_serie
 alter table public.profiles enable row level security;
 alter table public.calendar_items enable row level security;
 alter table public.recurrence_series enable row level security;
+alter table public.reminders enable row level security;
 
 -- Políticas para Profiles
 create policy "Usuários podem visualizar apenas seu próprio perfil"
@@ -110,6 +133,23 @@ create policy "Usuários podem excluir apenas suas próprias séries"
   on public.recurrence_series for delete
   using (auth.uid() = user_id);
 
+-- Políticas para Reminders (Etapa 3)
+create policy "Usuários podem visualizar apenas seus próprios lembretes"
+  on public.reminders for select
+  using (auth.uid() = user_id);
+
+create policy "Usuários podem inserir apenas lembretes com seu próprio user_id"
+  on public.reminders for insert
+  with check (auth.uid() = user_id);
+
+create policy "Usuários podem atualizar apenas seus próprios lembretes"
+  on public.reminders for update
+  using (auth.uid() = user_id);
+
+create policy "Usuários podem excluir apenas seus próprios lembretes"
+  on public.reminders for delete
+  using (auth.uid() = user_id);
+
 -- ==============================================================================
 -- TRIGGER PARA ATUALIZAÇÃO AUTOMÁTICA DE updated_at
 -- ==============================================================================
@@ -131,6 +171,10 @@ create or replace trigger set_calendar_items_updated_at
 
 create or replace trigger set_recurrence_series_updated_at
   before update on public.recurrence_series
+  for each row execute function public.handle_updated_at();
+
+create or replace trigger set_reminders_updated_at
+  before update on public.reminders
   for each row execute function public.handle_updated_at();
 
 -- ==============================================================================

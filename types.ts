@@ -44,7 +44,8 @@ export interface CalendarItem {
   startTime?: string; // HH:mm
   endTime?: string;   // HH:mm
   color?: string;     // Hex code or tailwind class reference
-  alertMinutes?: number; // Minutes before event to alert
+  alertMinutes?: number; // Minutes before event to alert (or advance offset)
+  alertTime?: string;    // HH:mm for full-day/finance items (default '08:00')
   
   // Finance Specifics
   amountCents?: number; // Integer cents (e.g. 3350 for R$ 33,50)
@@ -56,6 +57,25 @@ export interface CalendarItem {
   recurrenceId?: string;   // Legacy recurrence ID preserved
   isVirtualOccurrence?: boolean; // Generated dynamically for visible calendar window
   originalDateStr?: string; // For series exceptions mapping
+}
+
+export type ReminderStatus = 'scheduled' | 'sent' | 'delivered' | 'failed' | 'dismissed';
+export type ReminderChannel = 'browser_notification' | 'web_push' | 'whatsapp';
+
+export interface ReminderItem {
+  id: string;
+  userId?: string;
+  itemId: string;
+  channel: ReminderChannel;
+  scheduledAt: string; // ISO 8601 UTC
+  status: ReminderStatus;
+  title: string;
+  body: string;
+  advanceMinutes: number;
+  timezone: string;
+  sentAt?: string;
+  errorMessage?: string;
+  createdAt?: string;
 }
 
 export interface FilterState {
@@ -88,6 +108,7 @@ export interface DaySummary {
 export interface UserProfile {
   name: string;
   avatar?: string;
+  timezone?: string; // e.g. 'America/Sao_Paulo'
 }
 
 export interface StorageRecoveryInfo {

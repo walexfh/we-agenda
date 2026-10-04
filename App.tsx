@@ -54,6 +54,14 @@ import { DeleteModal } from './components/DeleteModal';
 import { BalanceSummary } from './components/BalanceSummary';
 import { LoginScreen } from './components/LoginScreen';
 import { ImportModal } from './components/ImportModal';
+import { DEFAULT_TIMEZONE } from './utils/reminderUtils';
+import { 
+  getNotificationPermission, 
+  requestNotificationPermission, 
+  registerServiceWorker, 
+  reconcileReminders, 
+  ReminderWatcher 
+} from './services/reminderService';
 import { 
   Calendar, 
   Filter, 
@@ -71,7 +79,10 @@ import {
   Check, 
   CloudCheck, 
   CloudOff, 
-  RefreshCw 
+  RefreshCw,
+  Bell,
+  BellOff,
+  Globe
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -107,6 +118,14 @@ export default function App() {
   const [series, setSeries] = useState<RecurrenceSeries[]>([]);
   const [userProfile, setUserProfile] = useState<UserProfile>({ name: '' });
   
+  // --- Lembretes e Fuso Horário (Etapa 3) ---
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(() => {
+    return getNotificationPermission();
+  });
+  const [activeAlertToast, setActiveAlertToast] = useState<{ title: string; body: string; id: string } | null>(null);
+
+  const accountTimezone = userProfile.timezone || DEFAULT_TIMEZONE;
+
   // Storage & Recovery State
   const [storageError, setStorageError] = useState<string | null>(null);
   const [corruptedState, setCorruptedState] = useState<{ rawContent: string; backupKey: string } | null>(null);
@@ -295,6 +314,36 @@ export default function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isDayDetailsOpen]);
+
+  // Registro de Service Worker para Web Push e notificações em segundo plano (Etapa 3)
+  useEffect(() => {
+    registerServiceWorker();
+  }, []);
+
+  // Daemon de checagem de lembretes ativos com alerta in-app e disparo de notificação
+  useEffect(() => {
+    const watcher = new ReminderWatcher((reminder) => {
+      setActiveAlertToast({
+        id: reminder.id,
+        title: reminder.title,
+        body: reminder.body,
+      });
+    });
+    watcher.start();
+    return () => watcher.stop();
+  }, []);
+
+  // Reconciliação automática da fila de lembretes sempre que a agenda ou fuso mudam
+  useEffect(() => {
+    if (currentUserId && items.length > 0) {
+      reconcileReminders(items, currentUserId, accountTimezone);
+    }
+  }, [items, currentUserId, accountTimezone]);
+
+  const handleRequestNotificationPermission = async () => {
+    const result = await requestNotificationPermission();
+    setNotificationPermission(result);
+  };
 
   // --- Ocorrências Dinâmicas de Séries Recorrentes ---
   const allVisibleItems = useMemo(() => {
@@ -872,6 +921,33 @@ export default function App() {
         </div>
       )}
 
+      {/* Toast Flutuante de Alerta em Tempo Real (Etapa 3) */}
+      {activeAlertToast && (
+        <div 
+          role="alert" 
+          className="fixed top-4 right-4 z-[90] max-w-sm w-full bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border-2 border-purple-500 p-4 animate-in slide-in-from-top-4 duration-300 flex items-start gap-3"
+        >
+          <div className="p-2 bg-purple-100 dark:bg-purple-900/50 rounded-xl text-purple-600 dark:text-purple-300 shrink-0">
+            <Bell size={20} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h4 className="font-bold text-sm text-gray-900 dark:text-gray-100 truncate">
+              {activeAlertToast.title}
+            </h4>
+            <p className="text-xs text-gray-600 dark:text-gray-300 mt-0.5 leading-relaxed">
+              {activeAlertToast.body}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActiveAlertToast(null)}
+            className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-lg cursor-pointer"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       {/* Top Bar */}
       <header className="px-4 py-3 bg-white dark:bg-gray-800 shadow-sm z-10 flex justify-between items-center transition-colors">
         <div className="flex items-center gap-2">
@@ -917,6 +993,33 @@ export default function App() {
               {syncStatus === 'local_demo' && 'Modo Local'}
             </span>
           </div>
+
+          {/* Indicador de Fuso Horário e Notificações (Etapa 3) */}
+          <button
+            type="button"
+            onClick={handleRequestNotificationPermission}
+            title={`Fuso Horário da conta: ${accountTimezone}. Clique para gerenciar permissão de lembretes.`}
+            className={clsx(
+              "hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors cursor-pointer",
+              notificationPermission === 'granted'
+                ? "bg-purple-50 text-purple-700 dark:bg-purple-950/30 dark:text-purple-300 border-purple-200 dark:border-purple-800/40"
+                : notificationPermission === 'denied'
+                ? "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400 border-gray-200 dark:border-gray-700"
+                : "bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400 border-amber-200 dark:border-amber-800/40"
+            )}
+          >
+            {notificationPermission === 'granted' ? (
+              <Bell size={13} className="text-purple-600 dark:text-purple-400" />
+            ) : notificationPermission === 'denied' ? (
+              <BellOff size={13} className="text-gray-400" />
+            ) : (
+              <Bell size={13} className="text-amber-500 animate-bounce" />
+            )}
+            <span>
+              {accountTimezone.split('/')[1]?.replace('_', ' ') || accountTimezone}
+              {notificationPermission === 'default' ? ' (Ativar)' : ''}
+            </span>
+          </button>
         </div>
 
         <div className="flex items-center gap-2">
@@ -993,6 +1096,8 @@ export default function App() {
         userProfile={userProfile}
         setUserProfile={handleUpdateProfile}
         onLogout={handleLogout}
+        notificationPermission={notificationPermission}
+        onRequestNotificationPermission={handleRequestNotificationPermission}
       />
 
       <FilterMenu 
@@ -1136,6 +1241,7 @@ export default function App() {
         selectedDate={selectedDate || new Date()}
         editingItem={editingItem}
         existingItems={items}
+        accountTimezone={accountTimezone}
       />
 
       <DeleteModal 

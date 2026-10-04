@@ -15,6 +15,7 @@ interface EventModalProps {
   selectedDate: Date;
   editingItem?: CalendarItem | null;
   existingItems: CalendarItem[];
+  accountTimezone?: string;
 }
 
 export const EventModal: React.FC<EventModalProps> = ({
@@ -23,6 +24,7 @@ export const EventModal: React.FC<EventModalProps> = ({
   onSave,
   selectedDate,
   editingItem,
+  accountTimezone = 'America/Sao_Paulo',
 }) => {
   const [activeType, setActiveType] = useState<ModalTabType>('appointment');
   
@@ -74,12 +76,13 @@ export const EventModal: React.FC<EventModalProps> = ({
         setRecurrence('once');
         setEditScope('single');
         
+        setAlertMinutes(editingItem.alertMinutes !== undefined ? editingItem.alertMinutes : -1);
+        
         if (editingItem.type === 'appointment') {
           setActiveType('appointment');
           setStartTime(editingItem.startTime || '09:00');
           setEndTime(editingItem.endTime || '10:00');
           setColor(editingItem.color || '#3b82f6');
-          setAlertMinutes(editingItem.alertMinutes || 0);
           setAmount('');
         } else {
           setActiveType('finance');
@@ -96,7 +99,7 @@ export const EventModal: React.FC<EventModalProps> = ({
         setRecurrence('once');
         setIsPaid(false);
         setFinanceType('expense');
-        setAlertMinutes(0);
+        setAlertMinutes(-1);
         setStartTime('09:00');
         setEndTime('10:00');
         setActiveType('appointment');
@@ -115,7 +118,6 @@ export const EventModal: React.FC<EventModalProps> = ({
     } else {
       setStartTime('09:00');
       setEndTime('10:00');
-      setAlertMinutes(0);
     }
   };
 
@@ -173,7 +175,7 @@ export const EventModal: React.FC<EventModalProps> = ({
         startTime: activeType === 'appointment' ? startTime : undefined,
         endTime: activeType === 'appointment' ? endTime : undefined,
         color: activeType === 'appointment' ? color : undefined,
-        alertMinutes: activeType === 'appointment' ? alertMinutes : undefined,
+        alertMinutes: alertMinutes >= 0 ? alertMinutes : undefined,
         amountCents: activeType === 'finance' ? amountCents : undefined,
         isPaid: activeType === 'finance' ? isPaid : undefined,
       };
@@ -320,18 +322,20 @@ export const EventModal: React.FC<EventModalProps> = ({
                     onChange={(e) => setAlertMinutes(Number(e.target.value))}
                     className="w-full pl-9 p-3 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-gray-50 dark:bg-gray-800 dark:text-white appearance-none"
                   >
-                    <option value={0}>Sem lembrete</option>
+                    <option value={-1}>Sem lembrete</option>
+                    <option value={0}>No horário do compromisso</option>
                     <option value={5}>5 minutos antes</option>
                     <option value={10}>10 minutos antes</option>
                     <option value={15}>15 minutos antes</option>
                     <option value={30}>30 minutos antes</option>
                     <option value={60}>1 hora antes</option>
+                    <option value={120}>2 horas antes</option>
                     <option value={1440}>1 dia antes</option>
                   </select>
                 </div>
-                <div className="flex items-center gap-1.5 mt-1.5 text-xs text-amber-600 dark:text-amber-400">
+                <div className="flex items-center gap-1.5 mt-1.5 text-xs text-blue-600 dark:text-blue-400">
                   <Info size={13} className="shrink-0" />
-                  <span>Modo local: notificações em segundo plano serão ativadas na Etapa 3.</span>
+                  <span>Fuso: {accountTimezone} • Notificação ativa</span>
                 </div>
               </div>
 
@@ -424,6 +428,33 @@ export const EventModal: React.FC<EventModalProps> = ({
                     : financeType === 'income' ? 'Pendente de recebimento (A receber)' : 'Pendente de pagamento (A pagar)'}
                 </span>
               </button>
+
+              {!isPaid && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Lembrete de Vencimento
+                  </label>
+                  <div className="relative">
+                    <Bell className="absolute left-3 top-3 text-gray-400" size={16} />
+                    <select
+                      value={alertMinutes}
+                      onChange={(e) => setAlertMinutes(Number(e.target.value))}
+                      className="w-full pl-9 p-3 border border-gray-200 dark:border-gray-700 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none bg-gray-50 dark:bg-gray-800 dark:text-white appearance-none"
+                    >
+                      <option value={-1}>Sem lembrete</option>
+                      <option value={0}>No dia do vencimento às 08:00</option>
+                      <option value={1440}>1 dia antes às 08:00</option>
+                      <option value={2880}>2 dias antes às 08:00</option>
+                      <option value={4320}>3 dias antes às 08:00</option>
+                      <option value={10080}>1 semana antes às 08:00</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-1.5 text-xs text-purple-600 dark:text-purple-400">
+                    <Info size={13} className="shrink-0" />
+                    <span>Fuso: {accountTimezone} • Notificação de contas a pagar/receber</span>
+                  </div>
+                </div>
+              )}
             </>
           )}
 

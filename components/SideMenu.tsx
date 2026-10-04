@@ -1,8 +1,9 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { CalendarItem, UserProfile } from '../types';
-import { X, CheckSquare, Square, DollarSign, Wallet, Moon, Sun, User, Edit2, Check, LogOut } from 'lucide-react';
+import { X, CheckSquare, Square, DollarSign, Wallet, Moon, Sun, User, Edit2, Check, LogOut, Globe, Bell } from 'lucide-react';
 import { formatCurrency } from '../utils/moneyUtils';
 import { formatMonthYear } from '../utils/dateUtils';
+import { POPULAR_TIMEZONES } from '../utils/reminderUtils';
 import { format, isSameMonth } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import clsx from 'clsx';
@@ -20,6 +21,8 @@ interface SideMenuProps {
   userProfile: UserProfile;
   setUserProfile: (p: UserProfile) => void;
   onLogout: () => void;
+  notificationPermission?: NotificationPermission | 'unsupported';
+  onRequestNotificationPermission?: () => void;
 }
 
 export const SideMenu: React.FC<SideMenuProps> = ({ 
@@ -34,7 +37,9 @@ export const SideMenu: React.FC<SideMenuProps> = ({
   toggleDarkMode,
   userProfile,
   setUserProfile,
-  onLogout
+  onLogout,
+  notificationPermission,
+  onRequestNotificationPermission
 }) => {
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempName, setTempName] = useState(userProfile.name);
@@ -113,6 +118,47 @@ export const SideMenu: React.FC<SideMenuProps> = ({
               <button onClick={onClose} className="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full text-gray-500 dark:text-gray-400">
                 <X size={20} />
               </button>
+          </div>
+
+          {/* Fuso Horário e Notificações (Etapa 3) */}
+          <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700/60 flex flex-col gap-2">
+            <div>
+              <label className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 mb-1">
+                <Globe size={13} /> Fuso Horário da Conta:
+              </label>
+              <select
+                value={userProfile.timezone || 'America/Sao_Paulo'}
+                onChange={(e) => setUserProfile({ ...userProfile, timezone: e.target.value })}
+                className="w-full text-xs p-1.5 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg outline-none text-gray-700 dark:text-gray-200 font-medium"
+              >
+                {POPULAR_TIMEZONES.map(tz => (
+                  <option key={tz.value} value={tz.value}>{tz.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center justify-between text-xs pt-0.5">
+              <span className="flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
+                <Bell size={13} /> Notificações:
+              </span>
+              {notificationPermission === 'granted' ? (
+                <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                  <Check size={12} /> Ativas
+                </span>
+              ) : notificationPermission === 'denied' ? (
+                <span className="text-red-500 dark:text-red-400 font-medium text-[11px]">
+                  Bloqueadas no navegador
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onRequestNotificationPermission}
+                  className="text-blue-600 dark:text-blue-400 font-semibold underline text-xs hover:text-blue-700 cursor-pointer"
+                >
+                  Ativar Lembretes
+                </button>
+              )}
+            </div>
           </div>
         </div>
 

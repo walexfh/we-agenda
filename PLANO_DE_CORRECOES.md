@@ -180,18 +180,85 @@ Este documento registra o diagnóstico, decisões técnicas, implementação, va
 
 #### C. Build de Produção (`npm run build`)
 - **Comando:** `tsc --noEmit && vite build`
-- **Resultado:** Build concluído com sucesso em 11.44s.
-- **Artefatos:**
-  - `dist/index.html` (0.62 kB)
-  - `dist/assets/index-U9FqMdm-.css` (35.83 kB)
-  - `dist/assets/index-Dd9liIDT.js` (586.96 kB)
+- **Resultado:** Build concluído com sucesso.
 
 ---
 
-### 5. Limitações e Pendências para Etapas Futuras
+## Etapa 3 — Lembretes Reais e Agendamento no Servidor
 
-- **Configuração Externa do Usuário:** Para conectar a uma instância real em produção, o usuário deve criar um projeto no Supabase, colar as credenciais em `.env.local` e executar o script `supabase/schema.sql` no SQL Editor do Supabase. A aplicação já está 100% preparada para essa conexão.
-- **Etapa 3:** Lembretes em segundo plano via servidor agendador, fuso horário configurável na conta (`America/Sao_Paulo`) e notificações push reais.
-- **Etapa 4:** Assistente pessoal com IA interpretando comandos de linguagem natural e validando ações no backend.
-- **Etapa 5:** Integração oficial com WhatsApp (áudio e texto).
-- **Etapa 6:** Categorias, parcelamentos, busca avançada e visualizações adicionais.
+### 1. Diagnóstico e Arquitetura da Etapa 3
+
+1. **Fuso Horário Explícito da Conta:**
+   - Padronizado para `America/Sao_Paulo` (Horário de Brasília, GMT-3).
+   - Armazenado no perfil do usuário (`profiles.timezone` no Supabase e `UserProfile.timezone` no armazenamento local).
+   - Seletor acessível diretamente no Menu Lateral (`SideMenu.tsx`) e indicador no cabeçalho.
+   - Conversão matemática e determinística entre data do calendário (`YYYY-MM-DD`), hora do evento (`HH:mm`), fuso IANA e timestamp UTC (`utils/reminderUtils.ts`).
+
+2. **Arquitetura de Fila / Scheduler no Servidor (Independente da Aba Aberta):**
+   - Criação da tabela relacional `reminders` no Supabase com isolamento rigoroso via Row Level Security (`auth.uid() = user_id`).
+   - Máquina de estados oficial: `scheduled` (agendado) → `sent` (enviado pelo scheduler) → `delivered` (entregue ao dispositivo) | `failed` (falhou) | `dismissed` (dispensado).
+   - Suporte nativo a múltiplos canais de entrega: `browser_notification`, `web_push` e `whatsapp` (preparado para as Etapas 4 e 5).
+   - Procedimento SQL concorrente com lock de linha (`for update skip locked`) em `supabase/reminders_cron.sql`, pronto para execução periódica a cada minuto via extensão `pg_cron` ou Supabase Edge Function / Webhook.
+
+3. **Respeito Rigoroso à Antecipação Configurada:**
+   - **Compromissos:** Antecipações de 0 min (no horário), 5 min, 10 min, 15 min, 30 min, 1 hora, 2 horas ou 1 dia antes.
+   - **Lançamentos Financeiros (Vencimentos):** Alertas configuráveis no dia do vencimento às 08:00, 1 dia antes às 08:00, 2 dias antes ou 3 dias antes.
+   - **Inteligência Financeira:** Lançamentos com status `isPaid: true` (pagos/recebidos) cancelam automaticamente qualquer lembrete pendente para evitar notificações desnecessárias.
+
+4. **Service Worker e Notificações Push:**
+   - Arquivo `public/sw.js` registrado no ciclo de vida do cliente.
+   - Suporte ao recebimento de eventos `push` mesmo com o navegador fechado ou em segundo plano.
+   - Clique na notificação redireciona com foco automático para a aba aberta ou inicializa o app.
+   - Alerta in-app flutuante de alta visibilidade caso o usuário esteja com o aplicativo aberto no momento do disparo.
+
+---
+
+### 2. Arquivos Alterados e Criados na Etapa 3
+
+| Arquivo | Motivo da Alteração | Status |
+|---|---|---|
+| `types.ts` | Definição de `ReminderItem`, `ReminderStatus`, `ReminderChannel`, `alertTime` e fuso em `UserProfile` | Concluído |
+| `utils/reminderUtils.ts` | Cálculo de antecipação com fuso horário IANA, conversores UTC e máquina de estados | Concluído |
+| `public/sw.js` | Service Worker para Web Push, vibração de dispositivo e manipulação de cliques em notificações | Concluído |
+| `services/reminderService.ts` | Gestão de permissões, registro de SW, reconciliação de fila, watcher in-app e sincronização | Concluído |
+| `supabase/schema.sql` | Adição de `timezone` em `profiles` e criação da tabela `reminders` com RLS, índices e triggers | Concluído |
+| `supabase/reminders_cron.sql` | Procedimento de processamento em lote para agendador independente via `pg_cron` ou Edge Function | Concluído |
+| `components/EventModal.tsx` | Seletor de lembrete com antecipação para compromissos e vencimentos financeiros | Concluído |
+| `components/SideMenu.tsx` | Seletor de fuso horário da conta e status de permissão de notificações no perfil | Concluído |
+| `services/syncService.ts` | Inclusão de `timezone` no mapeamento de perfil na nuvem | Concluído |
+| `App.tsx` | Inicialização do Service Worker, Daemon ReminderWatcher, badge de status e toast in-app | Concluído |
+| `tests/reminderUtils.test.ts` | Testes de conversão de fuso, cálculo de antecipação, cancelamento para pagos e máquina de estados | Concluído |
+
+---
+
+### 3. Validação e Testes da Etapa 3
+
+#### A. Verificação TypeScript (`npm run typecheck`)
+- **Comando:** `node ./node_modules/typescript/bin/tsc --noEmit`
+- **Resultado:** **0 erros**. Compilação 100% limpa.
+
+#### B. Testes Automatizados Unitários (`npm run test`)
+- **Ferramenta:** Vitest v3.2.7
+- **Resultado:** **32 testes em 9 arquivos com 100% de aprovação**.
+  - `tests/reminderUtils.test.ts`: 7 testes aprovados cobrindo conversão para UTC em `America/Sao_Paulo`, cálculo de antecipação, cancelamento de alerta em contas pagas e máquina de estados.
+  - `tests/moneyUtils.test.ts`: 6 testes aprovados.
+  - `tests/recurrenceUtils.test.ts`: 7 testes aprovados.
+  - `tests/authService.test.ts`: 4 testes aprovados.
+  - `tests/storageManager.test.ts`: 2 testes aprovados.
+  - `tests/dateUtils.test.ts`: 3 testes aprovados.
+  - `tests/syncService.test.ts`: 1 teste aprovado.
+  - `tests/supabaseClient.test.ts`: 1 teste aprovado.
+  - `tests/financialSummary.test.ts`: 1 teste aprovado.
+
+#### C. Build de Produção (`npm run build`)
+- **Comando:** `tsc --noEmit && vite build`
+- **Resultado:** Build concluído com sucesso em 9.51s gerando `dist/` minificado.
+
+---
+
+### 4. Próximas Etapas
+
+- **Etapa 4:** Assistente Pessoal com IA interpretando comandos em linguagem natural (ex: criação de despesas, compromissos e respostas somente após confirmação de gravação no banco).
+- **Etapa 5:** Integração oficial com WhatsApp (áudio e texto, com transcrição e webhook).
+- **Etapa 6:** Melhorias adicionais de produto (categorias personalizadas, pagamentos parciais, parcelamento de compras e busca avançada).
+
